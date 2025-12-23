@@ -1,0 +1,75 @@
+economy:
+  usa:
+    fred_features:
+      rates:
+        - [FEDFUNDS, Fed_Funds_Rate] # Federal Funds Effective Rate
+        - [DGS2, yield_2y] # 2-Year Treasury Constant Maturity Rate
+        - [DGS5, yield_5y] # 5-Year Treasury Constant Maturity Rate
+        - [DGS10, yield_10y] # 10-Year Treasury Constant Maturity Rate
+        - [DGS30, yield_30y] # 30-Year Treasury Constant Maturity Rate
+        - [T10Y2Y, 10Y_yield_2y_yield] # 10-Year Treasury Constant Maturity Minus 2-Year
+        - [UNRATE, Unemployment] # Unemployment Rate
+        - [MORTGAGE30US, 30Y_Mortg_Rate] # 30-Year Fixed Rate Mortgage Average in the United States
+      other:
+        - [PCEPI, PCE_Price] # Personal Consumption Expenditures Price Index
+        - [INDPRO, Industrial_Production] # Industrial Production Index
+        - [PAYEMS, NFP] # All Employees: Total Nonfarm Payrolls
+        - [UMCSENT, Consumer_Sentiment] # University of Michigan: Consumer Sentiment
+        - [HOUST, Housing_Starts] # Housing Starts: Total New Privately Owned
+        - [RETAILSMNSA, Retail_Sales] # Retail and Food Services Sales: Total Monthly
+        - [GDPC1, Real_GDP] # Real Gross Domestic Product
+        - [M2SL, M2_Money_Stock] # M2 Money Stock
+        - [WALCL, Fed_Assets] # Fed Assets: Total Assets
+        - [VIXCLS, VIX] # CBOE Volatility Index
+        - [DCOILWTICO, Crude_Oil]  # Crude Oil Prices: West Texas Intermediate (WTI)
+    market_tickers:
+      - [^GSPC, SP500]  # S&P 500
+      - [GC=F, Gold]   # Gold Futures
+      - [DX-Y.NYB, USD_Index]  # US Dollar Index
+  eurozone:
+    fred_features:
+      rates:
+        - [IRLTLT01EZM156N, yield_10y] # Long-Term Government Bond Yields: 10-Year for Euro Area
+        - [IR3TIB01EZM156N, interbank_3m] # 3-Month Interest Rate for Euro Area
+        - [ECBDFR, ECB_Deposit_Rate] # ECB: Deposit Facility Rate
+        - [CSCICP02EZM460S, Consumer_Confidence(%balance)] # Consumer Opinion Surveys: Composite Consumer Confidence for Euro Area (Percentage balance)
+        - [QXMR368BIS, Real_Property_Prices_YoY] # Real Residential Property Prices for Euro Area YoY
+      other:
+        - [CP00MI15EA20M086NEST, HICP] # HICP: All Items for Euro Area
+        - [ECBASSETSW, ECB_Assets] # ECB: Assets: Total Assets
+        - [CLVMNACSCAB1GQEA19, Real_GDP] # Real Gross Domestic Product for Euro Area
+    market_tickers:
+      - [GC=F, Gold] # Gold Futures
+      - [^STOXX, STOXX600] # STOXX Europe 600
+      - [EURUSD=X, EURUSD] # Euro to US Dollar Exchange Rate
+
+modeling:
+  default_start_date: "2000-01-01"
+
+features:
+  daily_return_periods: [1, 5, 10, 21, 63, 126, 252]
+  daily_volatility_windows: [5, 21, 63, 126, 252]
+  daily_ma_windows: [10, 21, 50, 63, 126, 200]
+  weekly_periods:
+    - [1, '1w']
+    - [2, '2w']
+    - [4, '1m']
+    - [8, '2m']
+    - [13, '3m']
+    - [26, '6m']
+    - [52, '1y']
+    - [104, '2y']
+  monthly_periods:
+    - [1, '1m']
+    - [3, '3m']
+    - [6, '6m']
+    - [12, '1y']
+    - [24, '2y']
+    - [36, '3y']
+  quarterly_periods:
+    - [1, '1q']
+    - [2, '2q']
+    - [4, '1y']
+    - [8, '2y']
+    - [12, '3y']
+    - [20, '5y']
