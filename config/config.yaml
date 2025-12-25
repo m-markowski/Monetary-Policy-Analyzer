@@ -42,6 +42,8 @@ economy:
       - [GC=F, Gold] # Gold Futures
       - [^STOXX, STOXX600] # STOXX Europe 600
       - [EURUSD=X, EURUSD] # Euro to US Dollar Exchange Rate
+      - [CL=F, Crude_Oil]  # Crude Oil Futures
+      - [NG=F, Natural_Gas]  # Natural Gas Futures
 
 modeling:
   default_start_date: "2000-01-01"

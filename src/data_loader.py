@@ -174,7 +174,7 @@ class EconomyDataLoader:
         df[[col for col in market_df.columns if col != 'date']] = df[[col for col in market_df.columns if col != 'date']].ffill()
         # Drop any remaining NaNs
         df = df.dropna()
-        # Replace incorrect negative values with mean for a given column (do not apply to metrics that can be negative)
+        # Replace incorrect negative values with mean for a given column (does not apply to metrics that can be negative)
         for col in [col for col in df.columns if col not in ['T10Y2Y', 'FEDFUNDS', 'DGS2', 'DGS5', 'DGS10', 'DGS30',
                                                          'IRLTLT01EZM156N', 'IR3TIB01EZM156N', 'ECBDFR', 'CSCICP02EZM460S', 'QXMR368BIS']]:
             mean_val = df.loc[df[col] >= 0, col].mean()
