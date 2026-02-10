@@ -2,76 +2,94 @@ economy:
   usa:
     fred_features:
       rates:
-        - [FEDFUNDS, Fed_Funds_Rate] # Federal Funds Effective Rate
-        - [DGS2, yield_2y] # 2-Year Treasury Constant Maturity Rate
-        - [DGS5, yield_5y] # 5-Year Treasury Constant Maturity Rate
-        - [DGS10, yield_10y] # 10-Year Treasury Constant Maturity Rate
-        - [DGS30, yield_30y] # 30-Year Treasury Constant Maturity Rate
-        - [T10Y2Y, 10Y_yield_2y_yield] # 10-Year Treasury Constant Maturity Minus 2-Year
-        - [UNRATE, Unemployment] # Unemployment Rate
-        - [MORTGAGE30US, 30Y_Mortg_Rate] # 30-Year Fixed Rate Mortgage Average in the United States
+        - [DFF, rate_ff_eff] # Federal Funds Effective Rate
+        - [DTB3, yld_tbill_3m] # 3M Treasury Bill Secondary Market Rate (discount basis)
+        - [DGS2, yld_ust_2y] # Treasury Constant Maturity Yield: 2-Year
+        - [DGS5, yld_ust_5y] # Treasury Constant Maturity Yield: 5-Year
+        - [DGS10, yld_ust_10y] # Treasury Constant Maturity Yield: 10-Year
+        - [DGS30, yld_ust_30y] # Treasury Constant Maturity Yield: 30-Year
+        - [T10Y3M, sprd_10y_3m] # Treasury Yield Spread: 10Y minus 3M
+        - [T10Y2Y, sprd_10y_2y] # Treasury Yield Spread: 10Y minus 2Y
+        - [DBAA, yld_corp_baa] # Moody's Seasoned Baa Corporate Bond Yield
+        - [MORTGAGE30US, rate_mortgage_30y] # 30-Year Fixed Mortgage Average Rate
+        - [SAHMREALTIME, ind_sahm_realtime] # Real-Time Sahm Recession Indicator
+        - [UNRATE, rate_unemployment] # Unemployment Rate
+        - [CIVPART, rate_participation] # Labor Force Participation Rate
+        - [MICH, exp_infl_mich] # Michigan Survey: Inflation Expectations
+        - [CORESTICKM159SFRBATL, cpi_sticky_core] # Sticky CPI Less Food and Energy
+        - [M2V, vel_money_m2] # Velocity of M2 Money Stock
+        - [PSAVERT, rate_savings] # Personal Saving Rate
+        - [RSAHORUSQ156S, rate_homeownership] # Homeownership Rate
       other:
-        - [PCEPI, PCE_Price] # Personal Consumption Expenditures Price Index
-        - [INDPRO, Industrial_Production] # Industrial Production Index
-        - [PAYEMS, NFP] # All Employees: Total Nonfarm Payrolls
-        - [UMCSENT, Consumer_Sentiment] # University of Michigan: Consumer Sentiment
-        - [HOUST, Housing_Starts] # Housing Starts: Total New Privately Owned
-        - [RETAILSMNSA, Retail_Sales] # Retail and Food Services Sales: Total Monthly
-        - [GDPC1, Real_GDP] # Real Gross Domestic Product
-        - [M2SL, M2_Money_Stock] # M2 Money Stock
-        - [WALCL, Fed_Assets] # Fed Assets: Total Assets
-        - [VIXCLS, VIX] # CBOE Volatility Index
-        - [DCOILWTICO, Crude_Oil]  # Crude Oil Prices: West Texas Intermediate (WTI)
+        - [GDPC1, gdp_real] # Real Gross Domestic Product
+        - [INDPRO, ind_production] # Industrial Production Index
+        - [PAYEMS, emp_nonfarm] # Total Nonfarm Payroll Employment
+        - [MANEMP, emp_mfg] # Manufacturing Employment
+        - [LES1252881600Q, wage_real_median_ft] # Median Real Weekly Earnings: Full-Time Workers
+        - [DSPIC96, income_real_disp] # Real Disposable Personal Income
+        - [A091RC1Q027SBEA, gov_exp_interest] # Federal Government Interest Payments
+        - [MTSDS133FMS, gov_balance] # Federal Surplus or Deficit
+        - [GFDEBTN, gov_debt_total] # Total Public Debt Outstanding
+        - [BOGZ1FL192090005Q, hh_net_worth] # Household Net Worth (level)
+        - [USSTHPI, house_price_all] # All-Transactions House Price Index
+        - [MSPUS, house_price_median] # Median House Sales Price
+        - [HOUST, house_starts] # Housing Starts: Total Units
+        - [CPIAUCSL, cpi_all] # CPI: All Items (Urban Consumers)
+        - [RMFSL, mmf_retail] # Retail Money Market Funds
+        - [M2SL, money_m2] # Money Supply: M2
+        - [UMCSENT, sent_consumer] # Michigan Consumer Sentiment Index
+        - [USEPUINDXD, ind_policy_uncert] # Economic Policy Uncertainty Index
+        - [NFCI, ind_fin_conditions] # Chicago Fed Financial Conditions Index
+        - [ICSA, claims_initial] # Initial Unemployment Claims
+        - [TOTALSA, sales_vehicle_total] # Total Vehicle Sales
+        - [VIXCLS, vol_vix] # CBOE Volatility Index (VIX)
     market_tickers:
-      - [^GSPC, SP500]  # S&P 500
-      - [GC=F, Gold]   # Gold Futures
-      - [DX-Y.NYB, USD_Index]  # US Dollar Index
+      - [^GSPC, eq_sp500] # S&P 500 Equity Index
+      - [DX-Y.NYB, fx_usd_index] # U.S. Dollar Index (DXY)
   eurozone:
     fred_features:
       rates:
-        - [IRLTLT01EZM156N, yield_10y] # Long-Term Government Bond Yields: 10-Year for Euro Area
-        - [IR3TIB01EZM156N, interbank_3m] # 3-Month Interest Rate for Euro Area
-        - [ECBDFR, ECB_Deposit_Rate] # ECB: Deposit Facility Rate
-        - [CSCICP02EZM460S, Consumer_Confidence(%balance)] # Consumer Opinion Surveys: Composite Consumer Confidence for Euro Area (Percentage balance)
-        - [QXMR368BIS, Real_Property_Prices_YoY] # Real Residential Property Prices for Euro Area YoY
+        - [IRLTLT01EZM156N, yld_10y_gov] # Long-Term Government Bond Yields: 10-Year for Euro Area
+        - [IR3TIB01EZM156N, rate_ib_3m] # 3-Month Interest Rate for Euro Area
+        - [ECBDFR, rate_ecb_dep] # ECB: Deposit Facility Rate
+        - [IRSTCI01EZM156N, rate_call_ib] # Overnight Interest Rate for Euro Area
+        - [CSCICP02EZM460S, sent_cons_conf] # Consumer Confidence Indicator for Euro Area
+        - [CSINFT02EZM460S, sent_cpi_exp] # Consumer Price Index: Expectations for Euro Area
+        - [CSESFT02EZM460S, sent_cons_econ_exp] # Consumer Economic Expectations for Euro Area
+        - [BSCICP02EZM460S, sent_mfg_conf] # Business Climate Indicator: Manufacturing for Euro Area
+        - [BCOBLV02EZM460S, sent_constr_orders] # Business Confidence Indicator: Construction Orders for Euro Area
+        - [EA19MABMM301GYSAM, money_m3] # Money Supply: M3 for Euro Area
+        - [LCEAMN01EZQ659S, wage_mfg_hr] # Hourly Earnings: Manufacturing for Euro Area
       other:
-        - [CP00MI15EA20M086NEST, HICP] # HICP: All Items for Euro Area
-        - [ECBASSETSW, ECB_Assets] # ECB: Assets: Total Assets
-        - [CLVMNACSCAB1GQEA19, Real_GDP] # Real Gross Domestic Product for Euro Area
+        - [CP00MI15EA20M086NEST, hicp_all] # Harmonized Index of Consumer Prices: All Items for Euro Area
+        - [CLVMNACSCAB1GQEA19, gdp_real] # Real Gross Domestic Product for Euro Area
+        - [ECBASSETSW, ecb_assets] # ECB: Assets: Total Assets
+        - [RBXMBIS, reer_broad] # Real Effective Exchange Rate: Broad for Euro Area
+        - [QXMR628BIS, house_real] # House Price Index: Residential for Euro Area (Real)
+        - [SPASTT01EZM661N, eq_ea_share_px] # Share Prices Index (2015=100), Not Seasonally Adjusted
     market_tickers:
-      - [GC=F, Gold] # Gold Futures
-      - [^STOXX, STOXX600] # STOXX Europe 600
-      - [EURUSD=X, EURUSD] # Euro to US Dollar Exchange Rate
-      - [CL=F, Crude_Oil]  # Crude Oil Futures
-      - [NG=F, Natural_Gas]  # Natural Gas Futures
+      - [GC=F, cmd_gold] # Gold Futures
+      - [NG=F, cmd_natgas]  # Natural Gas Futures
 
 modeling:
   default_start_date: "2000-01-01"
 
 features:
-  daily_return_periods: [1, 5, 10, 21, 63, 126, 252]
-  daily_volatility_windows: [5, 21, 63, 126, 252]
-  daily_ma_windows: [10, 21, 50, 63, 126, 200]
+  daily_return_periods: [1, 5, 21, 63, 252]
+  daily_volatility_windows: [5, 21, 63, 252]
+  daily_ma_windows: [21, 50, 200]
   weekly_periods:
     - [1, '1w']
-    - [2, '2w']
     - [4, '1m']
-    - [8, '2m']
     - [13, '3m']
-    - [26, '6m']
     - [52, '1y']
-    - [104, '2y']
   monthly_periods:
     - [1, '1m']
     - [3, '3m']
-    - [6, '6m']
     - [12, '1y']
-    - [24, '2y']
     - [36, '3y']
   quarterly_periods:
     - [1, '1q']
-    - [2, '2q']
     - [4, '1y']
-    - [8, '2y']
     - [12, '3y']
     - [20, '5y']

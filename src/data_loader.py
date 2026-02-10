@@ -7,6 +7,7 @@ import pandas as pd
 from pandas.errors import PerformanceWarning
 import yfinance as yf
 import warnings
+import time
 warnings.simplefilter(action = 'ignore', category = (FutureWarning, PerformanceWarning))
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -49,19 +50,33 @@ class EconomyDataLoader:
             end_date (str): End date (YYYY-MM-DD).
 
         Returns:
-            pd.Series: Time-indexed series of observations. Returns an empty series if the data cannot be retrieved.
+            pd.Series: Time-indexed series of observations.
+
+        Raises:
+            Exception: If data retrieval fails after retries.
         """
-        try:
-            data = self.fred.get_series(series_id = series_id,
-                                        observation_start = start_date,
-                                        observation_end = end_date)
-            return data
-        except Exception as e:
-            exception_logger.error(
-                f"Failed to fetch FRED series '{series_id}': {type(e).__name__} - {e}", exc_info=True
-            )
-            print(f"Could not fetch {series_id}")
-            return pd.Series(dtype=float)
+        max_retries = 5
+        delay = 2 # seconds
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                data = self.fred.get_series(series_id = series_id,
+                                            observation_start = start_date,
+                                            observation_end = end_date)
+                return data
+            except Exception as e:
+                if attempt == max_retries:
+                    exception_logger.error(
+                        f"Failed to fetch {series_id} after {max_retries} attempts: {e}",
+                        exc_info=True
+                    )
+                    print(f"Failed to fetch {series_id} after {max_retries} attempts: {e}")
+                    raise
+                exception_logger.warning(
+                    f"Attempt {attempt}/{max_retries} failed for {series_id}: {e}"
+                )
+                time.sleep(delay)
+                delay = min(delay * 2, 60)
 
     def fetch_all_fred_data(self, start_date: str, end_date: str) -> pd.DataFrame:
         """
@@ -81,9 +96,7 @@ class EconomyDataLoader:
                 return series_id, self.fetch_fred_series(series_id = series_id,
                                                          start_date = start_date,
                                                          end_date = end_date)
-            except Exception as e:
-                exception_logger.error(f"Failed to fetch {series_id}: {e}", exc_info=True)
-                print(f"Failed to fetch {series_id}")
+            except Exception:
                 return series_id, None
 
         results = {}
@@ -91,9 +104,14 @@ class EconomyDataLoader:
             future_to_series = {executor.submit(fetch_job, series_id): series_id
                                 for series_id in all_series}
             for future in as_completed(future_to_series):
-                series_id, data = future.result()
-                if data is not None:
-                    results[series_id] = data
+                expected_series_id = future_to_series[future]
+                try:
+                    series_id, data = future.result()
+                    if data is not None:
+                        results[series_id] = data
+                except Exception:
+                    exception_logger.error(f"Thread crashed for {expected_series_id}", exc_info=True)
+                    print(f"Thread crashed for {expected_series_id}")
         if not results:
             return pd.DataFrame()
 
@@ -121,7 +139,7 @@ class EconomyDataLoader:
                     data_dict[ticker] = df['Close']
             except Exception as e:
                 exception_logger.error(
-                    f"Failed to fetch ticker '{ticker}': {type(e).__name__} - {e}", exc_info=True
+                    f"Failed to fetch {ticker}: {e}", exc_info=True
                 )
                 print(f"Could not fetch {ticker}")
 
@@ -161,7 +179,7 @@ class EconomyDataLoader:
         elif not market_df.empty:
             df = market_df
         else:
-            exception_logger.error("No data could be fetched from any source")
+            exception_logger.error("No data could be fetched from any source.")
             raise ValueError("No data could be fetched from any source")
 
         df = df.sort_values('date').reset_index(drop=True)
@@ -174,11 +192,6 @@ class EconomyDataLoader:
         df[[col for col in market_df.columns if col != 'date']] = df[[col for col in market_df.columns if col != 'date']].ffill()
         # Drop any remaining NaNs
         df = df.dropna()
-        # Replace incorrect negative values with mean for a given column (does not apply to metrics that can be negative)
-        for col in [col for col in df.columns if col not in ['T10Y2Y', 'FEDFUNDS', 'DGS2', 'DGS5', 'DGS10', 'DGS30',
-                                                         'IRLTLT01EZM156N', 'IR3TIB01EZM156N', 'ECBDFR', 'CSCICP02EZM460S', 'QXMR368BIS']]:
-            mean_val = df.loc[df[col] >= 0, col].mean()
-            df.loc[df[col] < 0, col] = mean_val
         df = df.reset_index()
         df.rename(columns=dict(self.fred_config['rates'] + self.fred_config['other'] + self.market_tickers), inplace=True)
         return df
@@ -275,7 +288,7 @@ class EconomyDataLoader:
                 for periods, label in [tuple(period) for period in self.features[f'{freq_name}ly_periods']]:
                     change_series = period_data.pct_change(periods)
                     df[f'{col}_chg_{label}'] = df[f'year_{freq_name}'].map(change_series)
-        df.drop(['year_month', 'year_quarter', 'year_week'], axis=1, inplace=True, errors='ignore')
+            df.drop(columns = [f'year_{freq_name}'], axis = 1, inplace=True, errors='ignore')
         return df
 
     def create_yield_curve_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -289,33 +302,33 @@ class EconomyDataLoader:
             pd.DataFrame: DataFrame with yield curve features added.
         """
         # USA
-        if 'Fed_Funds_Rate' in df.columns:
+        if 'rate_ff_eff' in df.columns:
             treasury_rates = [
-                ('yield_30y', 'yield_10y'), # Long-end term premium
-                ('yield_5y', 'yield_2y'), # Mid-curve steepness
-                ('yield_10y', 'yield_5y') # Back-end steepness
+                ('yld_ust_30y', 'yld_ust_10y'), # Long-end term premium
+                ('yld_ust_5y', 'yld_ust_2y'), # Mid-curve steepness
+                ('yld_ust_10y', 'yld_ust_5y') # Back-end steepness
             ]
             for rate1, rate2 in treasury_rates:
                 if rate1 in df.columns and rate2 in df.columns:
-                    df[f'yield_curve_{rate1[6:]}{rate2[6:]}'] = df[rate1] - df[rate2]
+                    df[f'sprd_yld_{rate1[8:]}{rate2[8:]}'] = df[rate1] - df[rate2]
 
             # Policy stance vs medium term
-            if 'yield_5y' in df.columns and 'Fed_Funds_Rate' in df.columns:
-                df['policy_spread_5y'] = df['yield_5y'] - df['Fed_Funds_Rate']
+            if 'yld_ust_5y' in df.columns and 'rate_ff_eff' in df.columns:
+                df['sprd_5y_ff'] = df['yld_ust_5y'] - df['rate_ff_eff']
             # Distinguishes “expected hikes” vs “cuts”
-            if 'yield_2y' in df.columns and 'Fed_Funds_Rate' in df.columns:
-                df['policy_expectation_2y'] = df['yield_2y'] - df['Fed_Funds_Rate']
+            if 'yld_ust_2y' in df.columns and 'rate_ff_eff' in df.columns:
+                df['sprd_2y_ff'] = df['yld_ust_2y'] - df['rate_ff_eff']
         # Euro Area
-        elif 'ECB_Deposit_Rate' in df.columns:
+        elif 'rate_ecb_dep' in df.columns:
             # Long vs short term expectations
-            if 'yield_10y' in df.columns and 'interbank_3m' in df.columns:
-                df['yield_curve_10y_3m'] = (df['yield_10y'] - df['interbank_3m'])
+            if 'yld_10y_gov' in df.columns and 'rate_ib_3m' in df.columns:
+                df['sprd_10y_ib3m'] = (df['yld_10y_gov'] - df['rate_ib_3m'])
             # Policy restrictiveness vs long end
-            if 'yield_10y' in df.columns and 'ECB_Deposit_Rate' in df.columns:
-                df['policy_spread_10y'] = (df['yield_10y'] - df['ECB_Deposit_Rate'])
+            if 'yld_10y_gov' in df.columns and 'rate_ecb_dep' in df.columns:
+                df['sprd_10y_ecb'] = (df['yld_10y_gov'] - df['rate_ecb_dep'])
             # Market expectations vs ECB stance
-            if 'interbank_3m' in df.columns and 'ECB_Deposit_Rate' in df.columns:
-                df['policy_expectation_3m'] = (df['interbank_3m'] - df['ECB_Deposit_Rate'])
+            if 'rate_ib_3m' in df.columns and 'rate_ecb_dep' in df.columns:
+                df['psprd_ib_3m_ecb'] = (df['rate_ib_3m'] - df['rate_ecb_dep'])
         return df
 
     def engineer_all_features(self, df: pd.DataFrame) -> pd.DataFrame:
