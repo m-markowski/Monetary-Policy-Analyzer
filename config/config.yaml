@@ -42,7 +42,7 @@ economy:
         - [NFCI, ind_fin_conditions] # Chicago Fed Financial Conditions Index
         - [ICSA, claims_initial] # Initial Unemployment Claims
         - [TOTALSA, sales_vehicle_total] # Total Vehicle Sales
-        - [VIXCLS, vol_vix] # CBOE Volatility Index (VIX)
+        - [VIXCLS, idx_vix] # CBOE Volatility Index (VIX)
     market_tickers:
       - [^GSPC, eq_sp500] # S&P 500 Equity Index
       - [DX-Y.NYB, fx_usd_index] # U.S. Dollar Index (DXY)

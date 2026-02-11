@@ -265,13 +265,13 @@ class EconomyDataLoader:
                 continue
             for period in self.features['daily_return_periods']:
                 df[f'{col}_ret_{period}d'] = df[col].pct_change(period)
+            for window in self.features['daily_ma_windows']:
+                df[f'{col}_ma_{window}d'] = df[col].rolling(window).mean()
 
             returns = df[col].pct_change()
-            if returns.std() > 0.001:  # Threshold to avoid computing on near-constant series
+            if returns.std() > 0.0005:  # Threshold to avoid computing on near-constant series
                 for window in self.features['daily_volatility_windows']:
                     df[f'{col}_vol_{window}d'] = returns.rolling(window).std()
-                for window in self.features['daily_ma_windows']:
-                    df[f'{col}_ma_{window}d'] = df[col].rolling(window).mean()
 
         # Process weekly, monthly, and quarterly data with period-based changes
         frequencies = {
