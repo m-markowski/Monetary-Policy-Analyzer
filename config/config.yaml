@@ -96,4 +96,3 @@ staleness_tolerance_days:
   weekly: 21
   monthly: 75
   quarterly: 270
-  annual: 540
