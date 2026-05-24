@@ -38,8 +38,8 @@ class EconomyConfig:
         with open(YAML_PATH, "r") as f:
             config = yaml.safe_load(f)
         self.features = config["features"]
+        self.staleness_tolerance = config.get("staleness_tolerance_days", {})
         self.fred = Fred(api_key=os.getenv('FRED_API_KEY'))
         self.fred_config = config["economy"][self.economy]["fred_features"]
         self.market_tickers = config["economy"][self.economy]["market_tickers"]
-        self.start_date = datetime.strftime((datetime.strptime(config['modeling']['default_start_date'],
-                                                               "%Y-%m-%d") - timedelta(days=365*5)), "%Y-%m-%d")
+        self.start_date = config["modeling"]["default_start_date"]

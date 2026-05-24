@@ -87,9 +87,13 @@ features:
     - [1, '1m']
     - [3, '3m']
     - [12, '1y']
-    - [36, '3y']
   quarterly_periods:
     - [1, '1q']
     - [4, '1y']
-    - [12, '3y']
-    - [20, '5y']
+
+staleness_tolerance_days:
+  daily: 10
+  weekly: 21
+  monthly: 75
+  quarterly: 270
+  annual: 540
