@@ -1,8 +1,10 @@
-from pathlib import Path
-from config.settings import PROJECT_ROOT
 import json
 from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
+from config.settings import PROJECT_ROOT
+
 from src.data_loader import EconomyDataLoader
 
 DATA_DIR = PROJECT_ROOT / "data"
@@ -11,13 +13,16 @@ METADATA_PATH = CACHE_DIR / "cache_metadata.json"
 ECONOMIES = ("usa", "eurozone")
 TAIL_BUFFER_DAYS = 400  # > longest feature lookback (252d) + buffer for FRED revisions
 
+
 def raw_path(economy: str) -> Path:
     """Path to the cached raw levels snapshot for one economy."""
     return CACHE_DIR / f"raw_{economy}.parquet"
 
+
 def master_path(economy: str) -> Path:
     """Path to the engineered master CSV for one economy."""
     return CACHE_DIR / f"master_dataset_{economy}.csv"
+
 
 def build_and_save(economy: str, full_refresh: bool = False) -> dict:
     """
@@ -40,11 +45,15 @@ def build_and_save(economy: str, full_refresh: bool = False) -> dict:
 
     if rp.exists() and not full_refresh:
         stored = pd.read_parquet(rp)
-        tail_start = (stored["date"].max() - pd.Timedelta(days=TAIL_BUFFER_DAYS)).strftime("%Y-%m-%d")
+        tail_start = (stored["date"].max() - pd.Timedelta(days=TAIL_BUFFER_DAYS)).strftime(
+            "%Y-%m-%d"
+        )
         tail = loader.build_raw_dataset(start_date=tail_start)
         if set(tail.columns) == set(stored.columns):
             raw = pd.concat([stored[stored["date"] < tail["date"].min()], tail], ignore_index=True)
-            raw = raw.drop_duplicates("date", keep="last").sort_values("date").reset_index(drop=True)
+            raw = (
+                raw.drop_duplicates("date", keep="last").sort_values("date").reset_index(drop=True)
+            )
 
     if raw is None:
         # First run, forced refresh, or schema drift -> rebuild fully with a clean loader.
@@ -66,7 +75,9 @@ def build_and_save(economy: str, full_refresh: bool = False) -> dict:
         "working_end": master["date"].max().date().isoformat(),
         "n_rows": int(len(master)),
         "n_features": int(master.shape[1] - 1),
-        "kept_fred": [name for _, name in loader.fred_config["rates"] + loader.fred_config["other"]],
+        "kept_fred": [
+            name for _, name in loader.fred_config["rates"] + loader.fred_config["other"]
+        ],
         "kept_tickers": [name for _, name in loader.market_tickers],
         "dropped_fred": loader.dropped_fred,
         "dropped_tickers": loader.dropped_tickers,

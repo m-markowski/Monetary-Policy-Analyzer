@@ -1,14 +1,16 @@
-import yaml
 import os
-from fredapi import Fred
-from dotenv import load_dotenv
 from pathlib import Path
+
+import yaml
+from dotenv import load_dotenv
+from fredapi import Fred
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  # ~\Monetary_Policy_Analyzer
 YAML_PATH = PROJECT_ROOT / "config" / "config.yaml"
 ENV_PATH = PROJECT_ROOT / "config" / ".env"
 
-load_dotenv(dotenv_path = ENV_PATH)
+load_dotenv(dotenv_path=ENV_PATH)
+
 
 class EconomyConfig:
     """
@@ -23,7 +25,8 @@ class EconomyConfig:
         market_tickers (list[list[str]]): [ticker, friendly_name] pairs from yfinance.
         start_date (str): Default start date for modeling.
     """
-    def __init__(self, economy: str = 'USA'):
+
+    def __init__(self, economy: str = "USA"):
         """
         Initialize economy configuration and FRED client.
 
@@ -39,7 +42,7 @@ class EconomyConfig:
             config = yaml.safe_load(f)
         self.features = config["features"]
         self.staleness_tolerance = config.get("staleness_tolerance_days", {})
-        self.fred = Fred(api_key=os.getenv('FRED_API_KEY'))
+        self.fred = Fred(api_key=os.getenv("FRED_API_KEY"))
         self.fred_config = config["economy"][self.economy]["fred_features"]
         self.market_tickers = config["economy"][self.economy]["market_tickers"]
         self.start_date = config["modeling"]["default_start_date"]

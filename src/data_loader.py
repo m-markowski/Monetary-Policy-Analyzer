@@ -1,11 +1,12 @@
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+
 import pandas as pd
 import yfinance as yf
-import time
-from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from fredapi import Fred
 from config.settings import EconomyConfig
 from utils.logger import exception_logger
+
 
 class EconomyDataLoader:
     """
@@ -25,9 +26,10 @@ class EconomyDataLoader:
         skipped_features (list[dict]): Engineered features skipped, with reasons.
         feature_manifest (list[dict]): Per-source description of engineered features.
     """
-    FREQ_MAP = {'D': 'daily', 'W': 'weekly', 'M': 'monthly', 'Q': 'quarterly'}
 
-    def __init__(self, economy: str = 'USA'):
+    FREQ_MAP = {"D": "daily", "W": "weekly", "M": "monthly", "Q": "quarterly"}
+
+    def __init__(self, economy: str = "USA"):
         """
         Initialize the data loader with economy-specific configurations.
 
@@ -98,15 +100,18 @@ class EconomyDataLoader:
         info = self.get_series_metadata(series_id)
         if info is None:
             return True, "metadata unavailable"
-        obs_end = info.get('observation_end')
+        obs_end = info.get("observation_end")
         if obs_end is None or pd.isna(obs_end):
             return True, "no observation_end"
-        freq_short = (info.get('frequency_short') or '').upper()
-        freq = self.FREQ_MAP.get(freq_short, 'monthly')
+        freq_short = (info.get("frequency_short") or "").upper()
+        freq = self.FREQ_MAP.get(freq_short, "monthly")
         tolerance = self.staleness_tolerance.get(freq, 90)
         age_days = (pd.Timestamp.today().normalize() - pd.Timestamp(obs_end)).days
         if age_days > tolerance:
-            return True, f"last obs {pd.Timestamp(obs_end).date()} is {age_days}d old (>{tolerance}d for {freq})"
+            return (
+                True,
+                f"last obs {pd.Timestamp(obs_end).date()} is {age_days}d old (>{tolerance}d for {freq})",
+            )
         return False, ""
 
     def get_ticker_last_quote(self, ticker: str) -> pd.Timestamp | None:
@@ -125,10 +130,12 @@ class EconomyDataLoader:
         end = pd.Timestamp.today().normalize()
         start = end - pd.Timedelta(days=30)
         try:
-            df = yf.download(tickers=ticker,
-                             start=start.strftime('%Y-%m-%d'),
-                             end=end.strftime('%Y-%m-%d'),
-                             progress=False)
+            df = yf.download(
+                tickers=ticker,
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                progress=False,
+            )
             if not df.empty:
                 ts = pd.Timestamp(df.index.max())
                 if ts.tzinfo is not None:
@@ -152,7 +159,7 @@ class EconomyDataLoader:
         last = self.get_ticker_last_quote(ticker)
         if last is None:
             return True, "no quotes returned by yfinance"
-        tolerance = self.staleness_tolerance.get('daily', 10)
+        tolerance = self.staleness_tolerance.get("daily", 10)
         age_days = (pd.Timestamp.today().normalize() - last).days
         if age_days > tolerance:
             return True, f"last quote {last.date()} is {age_days}d old (>{tolerance}d for daily)"
@@ -165,7 +172,7 @@ class EconomyDataLoader:
         Returns:
             None. Mutates self.fred_config and self.market_tickers in place.
         """
-        for bucket in ('rates', 'other'):
+        for bucket in ("rates", "other"):
             kept, dropped = [], []
             for sid, name in self.fred_config[bucket]:
                 stale, reason = self.is_series_stale(sid)
@@ -202,14 +209,14 @@ class EconomyDataLoader:
             tuple[str, str]: A tuple containing the resolved start and end dates.
         """
         if end_date is None:
-            end_date = datetime.today().strftime('%Y-%m-%d')
+            end_date = datetime.today().strftime("%Y-%m-%d")
         if start_date is None:
             starts = []
-            for sid, _ in self.fred_config['rates'] + self.fred_config['other']:
+            for sid, _ in self.fred_config["rates"] + self.fred_config["other"]:
                 info = self.get_series_metadata(sid)
-                if info and info.get('observation_start'):
-                    starts.append(pd.Timestamp(info['observation_start']))
-            start_date = max(starts).strftime('%Y-%m-%d') if starts else self.start_date
+                if info and info.get("observation_start"):
+                    starts.append(pd.Timestamp(info["observation_start"]))
+            start_date = max(starts).strftime("%Y-%m-%d") if starts else self.start_date
         return start_date, end_date
 
     def fetch_fred_series(self, series_id: str, start_date: str, end_date: str) -> pd.Series:
@@ -228,21 +235,33 @@ class EconomyDataLoader:
             Exception: If data retrieval fails after retries.
         """
         max_retries = 5
-        delay = 2 # seconds
+        delay = 2  # seconds
 
         for attempt in range(1, max_retries + 1):
             try:
-                data = self.fred.get_series(series_id = series_id,
-                                            observation_start = start_date,
-                                            observation_end = end_date)
+                data = self.fred.get_series(
+                    series_id=series_id, observation_start=start_date, observation_end=end_date
+                )
                 return data
             except Exception as e:
                 if attempt == max_retries:
-                    exception_logger.error(f"Failed to fetch {series_id} after {max_retries} attempts: {e}")
-                    self.record("error", f"Failed to fetch {series_id} after {max_retries} attempts: {e}", stage="fetch")
+                    exception_logger.error(
+                        f"Failed to fetch {series_id} after {max_retries} attempts: {e}"
+                    )
+                    self.record(
+                        "error",
+                        f"Failed to fetch {series_id} after {max_retries} attempts: {e}",
+                        stage="fetch",
+                    )
                     raise
-                exception_logger.warning(f"Attempt {attempt}/{max_retries} failed for {series_id}: {e}")
-                self.record("warning", f"Attempt {attempt}/{max_retries} failed for {series_id}: {e}", stage="fetch")
+                exception_logger.warning(
+                    f"Attempt {attempt}/{max_retries} failed for {series_id}: {e}"
+                )
+                self.record(
+                    "warning",
+                    f"Attempt {attempt}/{max_retries} failed for {series_id}: {e}",
+                    stage="fetch",
+                )
                 time.sleep(delay)
                 delay = min(delay * 2, 60)
 
@@ -257,20 +276,21 @@ class EconomyDataLoader:
         Returns:
             pd.DataFrame: DataFrame with all FRED series as columns.
         """
-        all_series = [tick[0] for tick in (self.fred_config['rates'] + self.fred_config['other'])]
+        all_series = [tick[0] for tick in (self.fred_config["rates"] + self.fred_config["other"])]
 
-        def fetch_job(series_id: str) ->  tuple[str, pd.Series | None]:
+        def fetch_job(series_id: str) -> tuple[str, pd.Series | None]:
             try:
-                return series_id, self.fetch_fred_series(series_id = series_id,
-                                                         start_date = start_date,
-                                                         end_date = end_date)
+                return series_id, self.fetch_fred_series(
+                    series_id=series_id, start_date=start_date, end_date=end_date
+                )
             except Exception:
                 return series_id, None
 
         results = {}
         with ThreadPoolExecutor(max_workers=6) as executor:
-            future_to_series = {executor.submit(fetch_job, series_id): series_id
-                                for series_id in all_series}
+            future_to_series = {
+                executor.submit(fetch_job, series_id): series_id for series_id in all_series
+            }
             for future in as_completed(future_to_series):
                 expected_series_id = future_to_series[future]
                 try:
@@ -278,13 +298,15 @@ class EconomyDataLoader:
                     if data is not None:
                         results[series_id] = data
                 except Exception:
-                    exception_logger.error(f"Thread crashed for {expected_series_id}", exc_info=True)
-                    self.record("error", f"Thread crashed for {expected_series_id}",stage="fetch")
+                    exception_logger.error(
+                        f"Thread crashed for {expected_series_id}", exc_info=True
+                    )
+                    self.record("error", f"Thread crashed for {expected_series_id}", stage="fetch")
         if not results:
             return pd.DataFrame()
 
         df = pd.DataFrame(results)
-        df.index.name = 'date'
+        df.index.name = "date"
         return df.reset_index()
 
     def fetch_market_data(self, start_date: str, end_date: str) -> pd.DataFrame:
@@ -302,9 +324,9 @@ class EconomyDataLoader:
 
         for ticker, _ in self.market_tickers:
             try:
-                df = yf.download(tickers = ticker, start = start_date, end = end_date, progress=False)
+                df = yf.download(tickers=ticker, start=start_date, end=end_date, progress=False)
                 if not df.empty:
-                    data_dict[ticker] = df['Close']
+                    data_dict[ticker] = df["Close"]
             except Exception as e:
                 exception_logger.error(f"Failed to fetch {ticker}: {e}")
                 self.record("error", f"Failed to fetch {ticker}: {e}", stage="fetch")
@@ -312,11 +334,13 @@ class EconomyDataLoader:
         if data_dict:
             df = pd.concat(data_dict.values(), axis=1)
             df.columns = data_dict.keys()
-            df.index.name = 'date'
+            df.index.name = "date"
             return df.reset_index()
         return pd.DataFrame()
 
-    def build_raw_dataset(self, start_date: str | None = None, end_date: str | None = None) -> pd.DataFrame:
+    def build_raw_dataset(
+        self, start_date: str | None = None, end_date: str | None = None
+    ) -> pd.DataFrame:
         """
         Build a complete raw dataset (before feature engineering).
 
@@ -327,14 +351,14 @@ class EconomyDataLoader:
         Returns:
             pd.DataFrame: DataFrame with all raw data.
         """
-        self.filter_stale_features() # updates self.fred_config and self.market_tickers with data to keep
+        self.filter_stale_features()  # updates self.fred_config and self.market_tickers with data to keep
         start_date, end_date = self.resolve_date_range(start_date, end_date)
 
         fred_df = self.fetch_all_fred_data(start_date=start_date, end_date=end_date)
         market_df = self.fetch_market_data(start_date=start_date, end_date=end_date)
 
         if not fred_df.empty and not market_df.empty:
-            df = pd.merge(fred_df, market_df, on='date', how='outer')
+            df = pd.merge(fred_df, market_df, on="date", how="outer")
         elif not fred_df.empty:
             df = fred_df
         elif not market_df.empty:
@@ -343,22 +367,27 @@ class EconomyDataLoader:
             exception_logger.error("No data could be fetched from any source.")
             raise ValueError("No data could be fetched from any source")
 
-        df = df.sort_values('date').reset_index(drop=True)
-        df = df.set_index('date').resample('D').asfreq()
+        df = df.sort_values("date").reset_index(drop=True)
+        df = df.set_index("date").resample("D").asfreq()
 
-        fred_cols = [c for c in fred_df.columns if c != 'date']
-        market_cols = [c for c in market_df.columns if c != 'date']
+        fred_cols = [c for c in fred_df.columns if c != "date"]
+        market_cols = [c for c in market_df.columns if c != "date"]
 
         # Forward fill macro data if there are gaps
         df[fred_cols] = df[fred_cols].ffill()
         # Drop rows where market data is missing (non-trading days)
-        df = df.dropna(subset=market_cols, how='all')
+        df = df.dropna(subset=market_cols, how="all")
         # Forward fill market data if there are gaps on days such as July 4th
         df[market_cols] = df[market_cols].ffill()
         # Drop any remaining NaNs
         df = df.dropna()
         df = df.reset_index()
-        df.rename(columns=dict(self.fred_config['rates'] + self.fred_config['other'] + self.market_tickers), inplace=True)
+        df.rename(
+            columns=dict(
+                self.fred_config["rates"] + self.fred_config["other"] + self.market_tickers
+            ),
+            inplace=True,
+        )
         return df
 
     # Feature Engineering
@@ -373,12 +402,12 @@ class EconomyDataLoader:
             str | None: Detected frequency category ('daily', 'weekly', 'monthly', 'quarterly'), or None if undetectable.
         """
         if col in [tick[0] for tick in self.market_tickers]:
-            return 'daily'
+            return "daily"
         info = self.get_series_metadata(col)
         if info is None:
             exception_logger.error(f"No frequency detected for {col} (no metadata)")
             return None
-        return self.FREQ_MAP.get((info.get('frequency_short') or '').upper())
+        return self.FREQ_MAP.get((info.get("frequency_short") or "").upper())
 
     def classify_all_frequencies(self, cols: list[str]) -> dict[str, list[str]]:
         """
@@ -390,8 +419,10 @@ class EconomyDataLoader:
         Returns:
             dict[str, list[str]]: Dictionary with frequency categories as keys and lists of column names as values.
         """
-        frequencies = {'daily': [], 'weekly': [], 'monthly': [], 'quarterly': []}
-        name_to_ticker = {name: ticker for ticker, name in (self.fred_config['other'] + self.market_tickers)}
+        frequencies = {"daily": [], "weekly": [], "monthly": [], "quarterly": []}
+        name_to_ticker = {
+            name: ticker for ticker, name in (self.fred_config["other"] + self.market_tickers)
+        }
         for col in cols:
             raw_id = name_to_ticker.get(col, col)
             freq = self.detect_frequency(col=raw_id)
@@ -411,24 +442,26 @@ class EconomyDataLoader:
             pd.DataFrame: DataFrame with engineered features.
         """
         all_cols = list(set(all_cols))
-        freq_classification = self.classify_all_frequencies(cols = all_cols)
+        freq_classification = self.classify_all_frequencies(cols=all_cols)
 
         # Process daily data with returns, volatility, and moving averages
-        for col in freq_classification['daily']:
+        for col in freq_classification["daily"]:
             if col not in df.columns:
                 continue
-            families = {"ret": [f"{p}d" for p in self.features['daily_return_periods']],
-                        "ma": [f"{w}d" for w in self.features['daily_ma_windows']]}
-            for period in self.features['daily_return_periods']:
-                df[f'{col}_ret_{period}d'] = df[col].pct_change(period)
-            for window in self.features['daily_ma_windows']:
-                df[f'{col}_ma_{window}d'] = df[col].rolling(window).mean()
+            families = {
+                "ret": [f"{p}d" for p in self.features["daily_return_periods"]],
+                "ma": [f"{w}d" for w in self.features["daily_ma_windows"]],
+            }
+            for period in self.features["daily_return_periods"]:
+                df[f"{col}_ret_{period}d"] = df[col].pct_change(period)
+            for window in self.features["daily_ma_windows"]:
+                df[f"{col}_ma_{window}d"] = df[col].rolling(window).mean()
 
             returns = df[col].pct_change()
             if returns.std() > 0.0005:  # Threshold to avoid computing on near-constant series
-                families["vol"] = [f"{w}d" for w in self.features['daily_volatility_windows']]
-                for window in self.features['daily_volatility_windows']:
-                    df[f'{col}_vol_{window}d'] = returns.rolling(window).std()
+                families["vol"] = [f"{w}d" for w in self.features["daily_volatility_windows"]]
+                for window in self.features["daily_volatility_windows"]:
+                    df[f"{col}_vol_{window}d"] = returns.rolling(window).std()
             else:
                 self.skipped_features.append(
                     {"feature": f"{col}_vol_*", "reason": "near-constant series (std ~ 0)"}
@@ -436,25 +469,24 @@ class EconomyDataLoader:
             self.feature_manifest.append({"base": col, "frequency": "daily", "families": families})
 
         # Process weekly, monthly, and quarterly data with period-based changes
-        frequencies = {
-            'week': 'W',
-            'month': 'M',
-            'quarter': 'Q'}
+        frequencies = {"week": "W", "month": "M", "quarter": "Q"}
         for freq_name, freq_code in frequencies.items():
-            df[f'year_{freq_name}'] = df['date'].dt.to_period(freq_code)
-            for col in freq_classification[freq_name + 'ly']:
+            df[f"year_{freq_name}"] = df["date"].dt.to_period(freq_code)
+            for col in freq_classification[freq_name + "ly"]:
                 if col not in df.columns:
                     continue
                 # Get last non-null observation per period
-                period_data = df.groupby(f'year_{freq_name}')[col].last()
-                for periods, label in [tuple(period) for period in self.features[f'{freq_name}ly_periods']]:
+                period_data = df.groupby(f"year_{freq_name}")[col].last()
+                for periods, label in [
+                    tuple(period) for period in self.features[f"{freq_name}ly_periods"]
+                ]:
                     change_series = period_data.pct_change(periods)
-                    df[f'{col}_chg_{label}'] = df[f'year_{freq_name}'].map(change_series)
-                labels = [label for _, label in self.features[f'{freq_name}ly_periods']]
+                    df[f"{col}_chg_{label}"] = df[f"year_{freq_name}"].map(change_series)
+                labels = [label for _, label in self.features[f"{freq_name}ly_periods"]]
                 self.feature_manifest.append(
                     {"base": col, "frequency": f"{freq_name}ly", "families": {"chg": labels}}
                 )
-            df.drop(columns=[f'year_{freq_name}'], axis=1, inplace=True, errors='ignore')
+            df.drop(columns=[f"year_{freq_name}"], axis=1, inplace=True, errors="ignore")
         return df
 
     def create_yield_curve_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -477,20 +509,39 @@ class EconomyDataLoader:
             ],
             "eurozone": [
                 ("sprd_10y_ib3m", "yld_10y_gov", "rate_ib_3m", "Long vs short-term expectations"),
-                ("sprd_10y_ecb", "yld_10y_gov", "rate_ecb_dep", "Policy restrictiveness vs long end"),
-                ("psprd_ib_3m_ecb", "rate_ib_3m", "rate_ecb_dep", "Market expectations vs ECB stance"),
+                (
+                    "sprd_10y_ecb",
+                    "yld_10y_gov",
+                    "rate_ecb_dep",
+                    "Policy restrictiveness vs long end",
+                ),
+                (
+                    "psprd_ib_3m_ecb",
+                    "rate_ib_3m",
+                    "rate_ecb_dep",
+                    "Market expectations vs ECB stance",
+                ),
             ],
         }
         for out, a, b, desc in specs.get(self.economy, []):
             if a in df.columns and b in df.columns:
                 df[out] = df[a] - df[b]
-                self.feature_manifest.append({"base": out, "frequency": "derived",
-                                              "families": {"spread": [f"{a} - {b}"]}, "desc": desc})
+                self.feature_manifest.append(
+                    {
+                        "base": out,
+                        "frequency": "derived",
+                        "families": {"spread": [f"{a} - {b}"]},
+                        "desc": desc,
+                    }
+                )
             else:
                 missing = [c for c in (a, b) if c not in df.columns]
                 self.skipped_features.append(
-                    {"feature": out, "reason": f"missing input(s): {', '.join(missing)} (dropped as stale)",
-                     "desc": desc}
+                    {
+                        "feature": out,
+                        "reason": f"missing input(s): {', '.join(missing)} (dropped as stale)",
+                        "desc": desc,
+                    }
                 )
         return df
 
@@ -506,8 +557,8 @@ class EconomyDataLoader:
         """
         # No rates here as these are already transformed interest rates.
         # Calculating returns/volatility on rates doesn't make economic sense.
-        all_cols = [tick[1] for tick in (self.fred_config['other'] + self.market_tickers)]
-        df = self.create_features(df = df, all_cols = all_cols)
-        df = self.create_yield_curve_features(df = df)
+        all_cols = [tick[1] for tick in (self.fred_config["other"] + self.market_tickers)]
+        df = self.create_features(df=df, all_cols=all_cols)
+        df = self.create_yield_curve_features(df=df)
         df = df.dropna()
         return df

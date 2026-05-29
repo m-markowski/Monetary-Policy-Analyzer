@@ -34,5 +34,6 @@ def setup_exception_logger() -> logging.Logger:
     logger.addHandler(handler)
     return logger
 
+
 # Global logger instance
 exception_logger = setup_exception_logger()

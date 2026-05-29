@@ -1,8 +1,13 @@
 import pandas as pd
 import streamlit as st
 from src.dataset_builder import (
-    ECONOMIES, build_and_save, save_metadata,
-    cache_exists, load_metadata, load_master, master_mtime,
+    ECONOMIES,
+    build_and_save,
+    cache_exists,
+    load_master,
+    load_metadata,
+    master_mtime,
+    save_metadata,
 )
 
 st.set_page_config(page_title="Monetary Policy Analyzer", layout="wide")
@@ -14,6 +19,7 @@ FAMILY_LABELS = {
     "chg": "Period-over-period change",
     "spread": "Spread",
 }
+
 
 @st.cache_data(show_spinner=False)
 def get_master(economy: str, mtime: float) -> pd.DataFrame:
@@ -37,13 +43,18 @@ def render_economy_card(meta: dict) -> None:
     c1.metric("Working range", f"{meta['working_start']} → {meta['working_end']}")
     c2.metric("Rows", f"{meta['n_rows']:,}")
     c3.metric("Features", meta["n_features"])
-    st.caption(f"Raw (levels) range: {meta['raw_start']} → {meta['raw_end']} · built {meta['built_at']}")
+    st.caption(
+        f"Raw (levels) range: {meta['raw_start']} → {meta['raw_end']} · built {meta['built_at']}"
+    )
 
     dropped = meta["dropped_fred"] + meta["dropped_tickers"]
     if dropped:
         with st.expander(f"Dropped {len(dropped)} stale series/tickers"):
-            st.dataframe(pd.DataFrame(dropped, columns=["id", "name", "reason"]),
-                         use_container_width=True, hide_index=True)
+            st.dataframe(
+                pd.DataFrame(dropped, columns=["id", "name", "reason"]),
+                use_container_width=True,
+                hide_index=True,
+            )
     else:
         st.caption("No series dropped for staleness.")
 
@@ -53,17 +64,24 @@ def render_economy_card(meta: dict) -> None:
             st.dataframe(pd.DataFrame(skipped), use_container_width=True, hide_index=True)
 
     with st.expander("Engineered features by source"):
-        rows = [{"source": m["base"], "frequency": m["frequency"],
-                 "families": ", ".join(FAMILY_LABELS.get(k, k) for k in m["families"]),
-                 "n_features": sum(len(v) for v in m["families"].values())}
-                for m in meta.get("feature_manifest", [])]
+        rows = [
+            {
+                "source": m["base"],
+                "frequency": m["frequency"],
+                "families": ", ".join(FAMILY_LABELS.get(k, k) for k in m["families"]),
+                "n_features": sum(len(v) for v in m["families"].values()),
+            }
+            for m in meta.get("feature_manifest", [])
+        ]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     events = meta.get("events", [])
     levels = {"error": st.error, "warning": st.warning, "info": st.info}
     if events:
-        with st.expander(f"Load log ({len(events)} messages)",
-                         expanded=any(e["level"] == "error" for e in events)):
+        with st.expander(
+            f"Load log ({len(events)} messages)",
+            expanded=any(e["level"] == "error" for e in events),
+        ):
             for e in events:
                 levels.get(e["level"], st.write)(f"[{e['stage']}] {e['message']}")
 
@@ -87,8 +105,10 @@ if reload_clicked:
             st.write(f"Building {eco.upper()} dataset…")
             metas[eco] = build_and_save(eco, full_refresh=full_refresh)
             m = metas[eco]
-            st.write(f"{eco.upper()} ready: {m['working_start']} → {m['working_end']} "
-                     f"({m['n_rows']:,} rows, {m['n_features']} features)")
+            st.write(
+                f"{eco.upper()} ready: {m['working_start']} → {m['working_end']} "
+                f"({m['n_rows']:,} rows, {m['n_features']} features)"
+            )
         save_metadata(metas)
         status.update(label="Data loaded and cached", state="complete")
     get_master.clear()
