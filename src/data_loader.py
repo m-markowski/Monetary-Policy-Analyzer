@@ -1,15 +1,6 @@
-import sys
-from pathlib import Path
-project_root = Path(__file__).resolve().parent.parent
-if project_root not in sys.path:
-    sys.path.insert(0, str(project_root))
 import pandas as pd
-from pandas.errors import PerformanceWarning
 import yfinance as yf
-import warnings
 import time
-warnings.simplefilter('ignore', FutureWarning)
-warnings.simplefilter('ignore', PerformanceWarning)
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from fredapi import Fred
@@ -21,11 +12,18 @@ class EconomyDataLoader:
     Economy-specific data loader for FRED and market data.
 
     Attributes:
+        economy (str): Normalized economy identifier (lowercase).
         fred (Fred): FRED API client for economic data retrieval.
-        fred_config (dict): FRED features tickers for the economy.
-        market_tickers (list[str]): Market tickers associated with the economy. Obtained from yfinance.
-        start_date (str): Default start date for data retrieval.
-        features (dict): Periods for feature engineering.
+        fred_config (dict): FRED feature IDs grouped into 'rates' and 'other'.
+        market_tickers (list[list[str]]): [ticker, friendly_name] pairs from yfinance.
+        start_date (str): Fallback start date for data retrieval.
+        features (dict): Periods/windows for feature engineering.
+        staleness_tolerance (dict): Max observation age (days) per frequency.
+        dropped_fred (list): Dropped stale series as (id, name, reason).
+        dropped_tickers (list): Dropped stale tickers as (id, name, reason).
+        events (list[dict]): User-facing log events ({'level', 'stage', 'message'}).
+        skipped_features (list[dict]): Engineered features skipped, with reasons.
+        feature_manifest (list[dict]): Per-source description of engineered features.
     """
     FREQ_MAP = {'D': 'daily', 'W': 'weekly', 'M': 'monthly', 'Q': 'quarterly'}
 
@@ -36,7 +34,7 @@ class EconomyDataLoader:
         Args:
             economy (str): Economy identifier aligned with YAML config keys.
         """
-        economy_cfg = EconomyConfig(economy = economy.lower())
+        economy_cfg = EconomyConfig(economy)
         self.economy = economy_cfg.economy
         self.fred = economy_cfg.fred
         self.fred_config = economy_cfg.fred_config
@@ -46,6 +44,25 @@ class EconomyDataLoader:
         self.staleness_tolerance = economy_cfg.staleness_tolerance
         self.metadata_cache = {}
         self.ticker_cache = {}
+        self.dropped_fred = []
+        self.dropped_tickers = []
+        self.events = []  # {'level': 'warning'|'error'|'info', 'stage': str, 'message': str}
+        self.skipped_features = []
+        self.feature_manifest = []
+
+    def record(self, level: str, message: str, stage: str = "") -> None:
+        """
+        Collect a user-facing event instead of printing/logging to a file.
+
+        Args:
+            level (str): Severity ('info', 'warning' or 'error').
+            message (str): Human-readable event message.
+            stage (str): Pipeline stage that produced the event.
+
+        Returns:
+            None. Appends an entry to self.events.
+        """
+        self.events.append({"level": level, "stage": stage, "message": message})
 
     def get_series_metadata(self, series_id: str) -> dict | None:
         """
@@ -76,8 +93,7 @@ class EconomyDataLoader:
             series_id (str): FRED series identifier.
 
         Returns:
-            tuple[bool, str]: A tuple where the first element is a boolean indicating if the series is stale,
-            and the second element is a string providing the reason for staleness if applicable.
+            tuple[bool, str]: (is_stale, reason). Reason is empty when the series is fresh.
         """
         info = self.get_series_metadata(series_id)
         if info is None:
@@ -158,10 +174,9 @@ class EconomyDataLoader:
                 else:
                     kept.append([sid, name])
             self.fred_config[bucket] = kept
+            self.dropped_fred.extend(dropped)
             for sid, name, reason in dropped:
-                msg = f"Dropping stale series {sid} ({name}): {reason}"
-                exception_logger.warning(msg)
-                print(msg)
+                exception_logger.warning(f"Dropped stale series {sid} ({name}): {reason}")
 
         kept, dropped = [], []
         for ticker, name in self.market_tickers:
@@ -171,18 +186,17 @@ class EconomyDataLoader:
             else:
                 kept.append([ticker, name])
         self.market_tickers = kept
+        self.dropped_tickers = dropped
         for ticker, name, reason in dropped:
-            msg = f"Dropping stale ticker {ticker} ({name}): {reason}"
-            exception_logger.warning(msg)
-            print(msg)
+            exception_logger.warning(f"Dropped stale ticker {ticker} ({name}): {reason}")
 
     def resolve_date_range(self, start_date: str | None, end_date: str | None) -> tuple[str, str]:
         """
         Resolve the date range for data retrieval.
 
         Args:
-            start_date (str): Start date (YYYY-MM-DD).
-            end_date (str): End date (YYYY-MM-DD).
+            start_date (str | None): Start date (YYYY-MM-DD); resolved from series metadata when None.
+            end_date (str | None): End date (YYYY-MM-DD); defaults to today when None.
 
         Returns:
             tuple[str, str]: A tuple containing the resolved start and end dates.
@@ -224,21 +238,17 @@ class EconomyDataLoader:
                 return data
             except Exception as e:
                 if attempt == max_retries:
-                    exception_logger.error(
-                        f"Failed to fetch {series_id} after {max_retries} attempts: {e}",
-                        exc_info=True
-                    )
-                    print(f"Failed to fetch {series_id} after {max_retries} attempts: {e}")
+                    exception_logger.error(f"Failed to fetch {series_id} after {max_retries} attempts: {e}")
+                    self.record("error", f"Failed to fetch {series_id} after {max_retries} attempts: {e}", stage="fetch")
                     raise
-                exception_logger.warning(
-                    f"Attempt {attempt}/{max_retries} failed for {series_id}: {e}"
-                )
+                exception_logger.warning(f"Attempt {attempt}/{max_retries} failed for {series_id}: {e}")
+                self.record("warning", f"Attempt {attempt}/{max_retries} failed for {series_id}: {e}", stage="fetch")
                 time.sleep(delay)
                 delay = min(delay * 2, 60)
 
     def fetch_all_fred_data(self, start_date: str, end_date: str) -> pd.DataFrame:
         """
-        Fetch FRED data for a given series and merge into one DataFrame.
+        Fetch all configured FRED series and merge into one DataFrame.
 
         Args:
             start_date (str): Start date (YYYY-MM-DD).
@@ -249,7 +259,7 @@ class EconomyDataLoader:
         """
         all_series = [tick[0] for tick in (self.fred_config['rates'] + self.fred_config['other'])]
 
-        def fetch_job(series_id: str) -> tuple[str, pd.Series] | tuple[str, None]:
+        def fetch_job(series_id: str) ->  tuple[str, pd.Series | None]:
             try:
                 return series_id, self.fetch_fred_series(series_id = series_id,
                                                          start_date = start_date,
@@ -269,7 +279,7 @@ class EconomyDataLoader:
                         results[series_id] = data
                 except Exception:
                     exception_logger.error(f"Thread crashed for {expected_series_id}", exc_info=True)
-                    print(f"Thread crashed for {expected_series_id}")
+                    self.record("error", f"Thread crashed for {expected_series_id}",stage="fetch")
         if not results:
             return pd.DataFrame()
 
@@ -296,10 +306,8 @@ class EconomyDataLoader:
                 if not df.empty:
                     data_dict[ticker] = df['Close']
             except Exception as e:
-                exception_logger.error(
-                    f"Failed to fetch {ticker}: {e}", exc_info=True
-                )
-                print(f"Could not fetch {ticker}")
+                exception_logger.error(f"Failed to fetch {ticker}: {e}")
+                self.record("error", f"Failed to fetch {ticker}: {e}", stage="fetch")
 
         if data_dict:
             df = pd.concat(data_dict.values(), axis=1)
@@ -319,7 +327,6 @@ class EconomyDataLoader:
         Returns:
             pd.DataFrame: DataFrame with all raw data.
         """
-
         self.filter_stale_features() # updates self.fred_config and self.market_tickers with data to keep
         start_date, end_date = self.resolve_date_range(start_date, end_date)
 
@@ -363,7 +370,7 @@ class EconomyDataLoader:
             col (str): Column name to check.
 
         Returns:
-            str: Detected frequency category ('daily', 'weekly', 'monthly', 'quarterly'), or None if undetectable.
+            str | None: Detected frequency category ('daily', 'weekly', 'monthly', 'quarterly'), or None if undetectable.
         """
         if col in [tick[0] for tick in self.market_tickers]:
             return 'daily'
@@ -410,6 +417,8 @@ class EconomyDataLoader:
         for col in freq_classification['daily']:
             if col not in df.columns:
                 continue
+            families = {"ret": [f"{p}d" for p in self.features['daily_return_periods']],
+                        "ma": [f"{w}d" for w in self.features['daily_ma_windows']]}
             for period in self.features['daily_return_periods']:
                 df[f'{col}_ret_{period}d'] = df[col].pct_change(period)
             for window in self.features['daily_ma_windows']:
@@ -417,8 +426,14 @@ class EconomyDataLoader:
 
             returns = df[col].pct_change()
             if returns.std() > 0.0005:  # Threshold to avoid computing on near-constant series
+                families["vol"] = [f"{w}d" for w in self.features['daily_volatility_windows']]
                 for window in self.features['daily_volatility_windows']:
                     df[f'{col}_vol_{window}d'] = returns.rolling(window).std()
+            else:
+                self.skipped_features.append(
+                    {"feature": f"{col}_vol_*", "reason": "near-constant series (std ~ 0)"}
+                )
+            self.feature_manifest.append({"base": col, "frequency": "daily", "families": families})
 
         # Process weekly, monthly, and quarterly data with period-based changes
         frequencies = {
@@ -435,7 +450,11 @@ class EconomyDataLoader:
                 for periods, label in [tuple(period) for period in self.features[f'{freq_name}ly_periods']]:
                     change_series = period_data.pct_change(periods)
                     df[f'{col}_chg_{label}'] = df[f'year_{freq_name}'].map(change_series)
-            df.drop(columns = [f'year_{freq_name}'], axis = 1, inplace=True, errors='ignore')
+                labels = [label for _, label in self.features[f'{freq_name}ly_periods']]
+                self.feature_manifest.append(
+                    {"base": col, "frequency": f"{freq_name}ly", "families": {"chg": labels}}
+                )
+            df.drop(columns=[f'year_{freq_name}'], axis=1, inplace=True, errors='ignore')
         return df
 
     def create_yield_curve_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -448,34 +467,31 @@ class EconomyDataLoader:
         Returns:
             pd.DataFrame: DataFrame with yield curve features added.
         """
-        # USA
-        if self.economy == 'usa':
-            treasury_rates = [
-                ('yld_ust_30y', 'yld_ust_10y'), # Long-end term premium
-                ('yld_ust_5y', 'yld_ust_2y'), # Mid-curve steepness
-                ('yld_ust_10y', 'yld_ust_5y') # Back-end steepness
-            ]
-            for rate1, rate2 in treasury_rates:
-                if rate1 in df.columns and rate2 in df.columns:
-                    df[f'sprd_yld_{rate1[8:]}{rate2[8:]}'] = df[rate1] - df[rate2]
-
-            # Policy stance vs medium term
-            if 'yld_ust_5y' in df.columns and 'rate_ff_eff' in df.columns:
-                df['sprd_5y_ff'] = df['yld_ust_5y'] - df['rate_ff_eff']
-            # Distinguishes “expected hikes” vs “cuts”
-            if 'yld_ust_2y' in df.columns and 'rate_ff_eff' in df.columns:
-                df['sprd_2y_ff'] = df['yld_ust_2y'] - df['rate_ff_eff']
-        # Euro Area
-        elif self.economy == 'eurozone':
-            # Long vs short term expectations
-            if 'yld_10y_gov' in df.columns and 'rate_ib_3m' in df.columns:
-                df['sprd_10y_ib3m'] = (df['yld_10y_gov'] - df['rate_ib_3m'])
-            # Policy restrictiveness vs long end
-            if 'yld_10y_gov' in df.columns and 'rate_ecb_dep' in df.columns:
-                df['sprd_10y_ecb'] = (df['yld_10y_gov'] - df['rate_ecb_dep'])
-            # Market expectations vs ECB stance
-            if 'rate_ib_3m' in df.columns and 'rate_ecb_dep' in df.columns:
-                df['psprd_ib_3m_ecb'] = (df['rate_ib_3m'] - df['rate_ecb_dep'])
+        specs = {
+            "usa": [
+                ("sprd_yld_30y10y", "yld_ust_30y", "yld_ust_10y", "Long-end term premium"),
+                ("sprd_yld_5y2y", "yld_ust_5y", "yld_ust_2y", "Mid-curve steepness"),
+                ("sprd_yld_10y5y", "yld_ust_10y", "yld_ust_5y", "Back-end steepness"),
+                ("sprd_5y_ff", "yld_ust_5y", "rate_ff_eff", "Policy stance vs medium term"),
+                ("sprd_2y_ff", "yld_ust_2y", "rate_ff_eff", "Expected hikes vs cuts"),
+            ],
+            "eurozone": [
+                ("sprd_10y_ib3m", "yld_10y_gov", "rate_ib_3m", "Long vs short-term expectations"),
+                ("sprd_10y_ecb", "yld_10y_gov", "rate_ecb_dep", "Policy restrictiveness vs long end"),
+                ("psprd_ib_3m_ecb", "rate_ib_3m", "rate_ecb_dep", "Market expectations vs ECB stance"),
+            ],
+        }
+        for out, a, b, desc in specs.get(self.economy, []):
+            if a in df.columns and b in df.columns:
+                df[out] = df[a] - df[b]
+                self.feature_manifest.append({"base": out, "frequency": "derived",
+                                              "families": {"spread": [f"{a} - {b}"]}, "desc": desc})
+            else:
+                missing = [c for c in (a, b) if c not in df.columns]
+                self.skipped_features.append(
+                    {"feature": out, "reason": f"missing input(s): {', '.join(missing)} (dropped as stale)",
+                     "desc": desc}
+                )
         return df
 
     def engineer_all_features(self, df: pd.DataFrame) -> pd.DataFrame:

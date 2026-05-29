@@ -3,7 +3,6 @@ import os
 from fredapi import Fred
 from dotenv import load_dotenv
 from pathlib import Path
-from datetime import datetime, timedelta
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  # ~\Monetary_Policy_Analyzer
 YAML_PATH = PROJECT_ROOT / "config" / "config.yaml"
@@ -17,11 +16,12 @@ class EconomyConfig:
 
     Attributes:
         economy (str): Normalized economy identifier (lowercase).
-        features (dict): Periods for feature engineering.
+        features (dict): Periods/windows for feature engineering.
+        staleness_tolerance (dict): Max observation age (days) per frequency.
         fred (Fred): Initialized FRED API client.
-        fred_config (dict): FRED features tickers for the economy.
-        market_tickers (list[str]): Market tickers associated with the economy. Obtained from yfinance.
-        start_date (str): Default start date for modeling, adjusted by subtracting 5 years.
+        fred_config (dict): FRED feature IDs grouped into 'rates' and 'other'.
+        market_tickers (list[list[str]]): [ticker, friendly_name] pairs from yfinance.
+        start_date (str): Default start date for modeling.
     """
     def __init__(self, economy: str = 'USA'):
         """
