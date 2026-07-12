@@ -28,7 +28,7 @@ def build_and_save(economy: str, full_refresh: bool = False) -> dict:
     """
     Build the engineered dataset for one economy and persist it.
 
-    On first run (or full_refresh) the entire history is fetched. Otherwise only
+    On the first run (or full_refresh), the entire history is fetched. Otherwise only
     a trailing window is refetched and spliced into the cached raw levels, which
     also absorbs FRED revisions to recent observations.
 
@@ -45,15 +45,11 @@ def build_and_save(economy: str, full_refresh: bool = False) -> dict:
 
     if rp.exists() and not full_refresh:
         stored = pd.read_parquet(rp)
-        tail_start = (stored["date"].max() - pd.Timedelta(days=TAIL_BUFFER_DAYS)).strftime(
-            "%Y-%m-%d"
-        )
+        tail_start = (stored["date"].max() - pd.Timedelta(days=TAIL_BUFFER_DAYS)).strftime("%Y-%m-%d")
         tail = loader.build_raw_dataset(start_date=tail_start)
         if set(tail.columns) == set(stored.columns):
             raw = pd.concat([stored[stored["date"] < tail["date"].min()], tail], ignore_index=True)
-            raw = (
-                raw.drop_duplicates("date", keep="last").sort_values("date").reset_index(drop=True)
-            )
+            raw = raw.drop_duplicates("date", keep="last").sort_values("date").reset_index(drop=True)
 
     if raw is None:
         # First run, forced refresh, or schema drift -> rebuild fully with a clean loader.
@@ -75,9 +71,7 @@ def build_and_save(economy: str, full_refresh: bool = False) -> dict:
         "working_end": master["date"].max().date().isoformat(),
         "n_rows": int(len(master)),
         "n_features": int(master.shape[1] - 1),
-        "kept_fred": [
-            name for _, name in loader.fred_config["rates"] + loader.fred_config["other"]
-        ],
+        "kept_fred": [name for _, name in loader.fred_config["rates"] + loader.fred_config["other"]],
         "kept_tickers": [name for _, name in loader.market_tickers],
         "dropped_fred": loader.dropped_fred,
         "dropped_tickers": loader.dropped_tickers,

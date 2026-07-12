@@ -1,3 +1,5 @@
+import warnings
+
 import pandas as pd
 import streamlit as st
 from src.dataset_builder import (
@@ -8,6 +10,13 @@ from src.dataset_builder import (
     load_metadata,
     master_mtime,
     save_metadata,
+)
+
+# Silence NumPy "divide by zero encountered in scalar divide" (appears when VIF hits inf)
+warnings.filterwarnings(
+    "ignore",
+    message="divide by zero encountered in scalar divide",
+    category=RuntimeWarning,
 )
 
 st.set_page_config(page_title="Monetary Policy Analyzer", layout="wide")
@@ -40,19 +49,17 @@ def render_economy_card(meta: dict) -> None:
     eco = meta["economy"].upper()
     st.subheader(eco)
     c1, c2, c3 = st.columns(3)
-    c1.metric("Working range", f"{meta['working_start']} → {meta['working_end']}")
+    c1.metric("Working range", f"{meta['working_start']} — {meta['working_end']}")
     c2.metric("Rows", f"{meta['n_rows']:,}")
     c3.metric("Features", meta["n_features"])
-    st.caption(
-        f"Raw (levels) range: {meta['raw_start']} → {meta['raw_end']} · built {meta['built_at']}"
-    )
+    st.caption(f"Raw (levels) range: {meta['raw_start']} — {meta['raw_end']}. Built {meta['built_at']}")
 
     dropped = meta["dropped_fred"] + meta["dropped_tickers"]
     if dropped:
         with st.expander(f"Dropped {len(dropped)} stale series/tickers"):
             st.dataframe(
                 pd.DataFrame(dropped, columns=["id", "name", "reason"]),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
     else:
@@ -61,7 +68,7 @@ def render_economy_card(meta: dict) -> None:
     skipped = meta.get("skipped_features", [])
     if skipped:
         with st.expander(f"{len(skipped)} feature(s) skipped"):
-            st.dataframe(pd.DataFrame(skipped), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(skipped), width="stretch", hide_index=True)
 
     with st.expander("Engineered features by source"):
         rows = [
@@ -73,8 +80,7 @@ def render_economy_card(meta: dict) -> None:
             }
             for m in meta.get("feature_manifest", [])
         ]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
     events = meta.get("events", [])
     levels = {"error": st.error, "warning": st.warning, "info": st.info}
     if events:
@@ -106,7 +112,7 @@ if reload_clicked:
             metas[eco] = build_and_save(eco, full_refresh=full_refresh)
             m = metas[eco]
             st.write(
-                f"{eco.upper()} ready: {m['working_start']} → {m['working_end']} "
+                f"{eco.upper()} ready: {m['working_start']} — {m['working_end']} "
                 f"({m['n_rows']:,} rows, {m['n_features']} features)"
             )
         save_metadata(metas)
@@ -127,11 +133,11 @@ for eco in ECONOMIES:
 
 ov = meta["overlap"]
 if ov["has_overlap"]:
-    st.success(f"Common comparison window (USA & Eurozone): **{ov['start']} → {ov['end']}**")
+    st.success(f"Common comparison window (USA & Eurozone): **{ov['start']} — {ov['end']}**")
 else:
     st.warning("The two economies do not overlap — cross-economy comparison will be limited.")
 
 with st.expander("Preview cached data"):
     eco = st.selectbox("Economy", ECONOMIES, format_func=str.upper)
     df = get_master(eco, master_mtime(eco))
-    st.dataframe(df.tail(10), use_container_width=True)
+    st.dataframe(df.tail(10), width="stretch")
