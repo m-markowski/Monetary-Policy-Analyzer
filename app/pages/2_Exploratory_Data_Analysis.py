@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from src.dataset_builder import ECONOMIES, cache_exists, load_master, master_mtime
-from src.regimes import available_regimes
+from src.regimes import available_regimes, regime_source_columns
 from utils import interpret
 from utils.plots import (
     box_or_violin,
@@ -101,21 +101,22 @@ def allowed_transforms(family: str) -> list[str]:
     return ["Level", "Log return (%)", "First difference"]
 
 
-def collapse_to_native(level: pd.Series) -> pd.Series:
+def collapse_to_monthly(level: pd.Series) -> pd.Series:
     """
-    Drop forward-fill repeats, keeping one row per genuine observation.
+    Down-sample to one value per month so tests see near-independent observations.
 
-    The master data is daily with low-frequency macro series forward-filled, so
-    consecutive identical values are fill artefacts. Removing them restores the
-    native sampling frequency, which is what the iid-based tests require.
+    The master data is daily with low-frequency macro series forward-filled and
+    policy rates held as step functions, so consecutive daily rows are largely
+    redundant and inflate the sample size. Taking the month-end value removes most
+    of that redundancy while preserving genuine held periods proportionally.
 
     Args:
         level (pd.Series): Date-indexed level series.
 
     Returns:
-        pd.Series: The series with consecutive duplicates removed.
+        pd.Series: Month-end sampled series with gaps dropped.
     """
-    return level[level.ne(level.shift())]
+    return level.resample("ME").last().dropna()
 
 
 def apply_transform(level: pd.Series, transform: str) -> pd.Series:
@@ -154,24 +155,24 @@ def suggest_bins(series: pd.Series, fallback: int = 30, cap: int = 60) -> int:
     return int(np.clip(round(span / width), 5, cap))
 
 
-def prepare_series(level: pd.Series, transform: str, native: bool, date_range: tuple) -> pd.Series:
+def prepare_series(level: pd.Series, transform: str, monthly: bool, date_range: tuple) -> pd.Series:
     """
-    Build the analysis series: collapse, transform, then slice to the date range.
+    Build the analysis series: down-sample, transform, then slice to the date range.
 
-    Native-frequency collapse runs before the transform so returns/changes are
-    computed between real observations, not between forward-filled duplicates.
+    Monthly down-sampling runs before the transform so returns/changes are computed
+    between month-end observations, not between forward-filled daily duplicates.
 
     Args:
         level (pd.Series): Date-indexed base-level series.
         transform (str): One of the labels from `allowed_transforms`.
-        native (bool): Collapse forward-fill repeats first.
+        monthly (bool): Down-sample to month-end before transforming.
         date_range (tuple): (start_date, end_date) to slice to, inclusive.
 
     Returns:
         pd.Series: Transformed, sliced, missing-dropped series.
     """
-    if native:
-        level = collapse_to_native(level)
+    if monthly:
+        level = collapse_to_monthly(level)
     series = apply_transform(level, transform).dropna()
     start, end = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
     return series[(series.index >= start) & (series.index <= end)]
@@ -181,8 +182,8 @@ def prepare_frame(source: pd.DataFrame, columns: list[str], transform: str, date
     """
     Build an aligned multi-column frame for the relationship views.
 
-    Applies the transform to each column on the shared daily index (no native-
-    frequency collapse, which would misalign columns), slices to the date range
+    Applies the transform to each column on the shared daily index (no monthly
+    down-sampling, which would misalign columns), slices to the date range
     and drops rows with any missing value so every pair is complete.
 
     Args:
@@ -313,14 +314,14 @@ with tab_overview:
         horizontal=True,
         key="overview_transform",
     )
-    native = top[1].toggle(
-        "Collapse to native frequency",
+    monthly = top[1].toggle(
+        "Collapse to monthly",
         value=True,
+        key="overview_monthly",
         help=(
-            "Drop forward-fill repeats so changes are computed between real observations, "
-            "not between filled duplicates. Note: on held/discrete series (e.g. policy rates) "
-            'this also removes genuine no-change periods, so "First difference" reflects only '
-            "the dates a value moved."
+            "Sample one value per month instead of daily, so held policy rates and "
+            "forward-filled macro series don't flood the chart with flat daily repeats. "
+            "Turn off for the full daily series."
         ),
     )
     overlay_returns = False
@@ -350,11 +351,11 @@ with tab_overview:
 
     if chart_features:
         if chart_transform == "Level" and overlay_returns:
-            levels_df = pd.DataFrame({c: prepare_series(df[c], "Level", native, date_range) for c in chart_features})
+            levels_df = pd.DataFrame({c: prepare_series(df[c], "Level", monthly, date_range) for c in chart_features})
             returns_df = pd.DataFrame()
             for c in chart_features:
                 if "Log return (%)" in allowed_transforms(family_of(c)):
-                    returns_df[c] = prepare_series(df[c], "Log return (%)", native, date_range)
+                    returns_df[c] = prepare_series(df[c], "Log return (%)", monthly, date_range)
                 else:
                     st.info(
                         f"**{c}** is measured in %, so a log return is not meaningful for it; "
@@ -363,31 +364,31 @@ with tab_overview:
             fig = levels_with_overlay(levels_df, returns_df, chart_features, title="")
         else:
             plot_df = pd.DataFrame(
-                {c: prepare_series(df[c], chart_transform, native, date_range) for c in chart_features}
+                {c: prepare_series(df[c], chart_transform, monthly, date_range) for c in chart_features}
             )
             fig = compare_lines(plot_df, chart_features, title="", zero_line=(chart_transform != "Level"))
         if fig is not None:
             st.plotly_chart(fig, width="stretch")
 
 with tab_dist:
-    st.subheader("Distribution & normality")
     ctrl = st.columns([3, 2, 1])
     default_var = DEFAULT_VARIABLE.get(economy)
     var_index = base_columns.index(default_var) if default_var in base_columns else 0
     variable = ctrl[0].selectbox("Variable", base_columns, index=var_index, key="dist_variable")
     transform = ctrl[1].selectbox("Transform", allowed_transforms(family_of(variable)), key="dist_transform")
     alpha = ctrl[2].selectbox("alpha (significance)", [0.10, 0.05, 0.01], index=1, key="dist_alpha")
-    native = st.toggle(
-        "Collapse to native frequency",
+    monthly = st.toggle(
+        "Collapse to monthly",
         value=True,
+        key="dist_monthly",
         help=(
-            "Drop forward-fill repeats before testing (keeps iid-based tests valid). "
-            "Note: on held/discrete series (e.g. policy rates) this also removes genuine "
-            'no-change periods, so "First difference" reflects only the dates a value moved.'
+            "Sample one value per month instead of daily. This is the main defence against "
+            "inflated significance: daily forward-filled data has a huge, artificial sample "
+            "size that pushes every p-value to zero."
         ),
     )
     confidence = 1 - alpha
-    series = prepare_series(df[variable], transform, native, date_range)
+    series = prepare_series(df[variable], transform, monthly, date_range)
     label = variable if transform == "Level" else f"{variable} - {transform}"
 
     if series.empty:
@@ -396,8 +397,8 @@ with tab_dist:
         if transform == "Level":
             st.warning(
                 "Normality and the mean CI assume independent, identically distributed "
-                "observations. The native-frequency toggle removes forward-fill repeats, "
-                "but a level series still trends and is autocorrelated, so it is not iid. "
+                "observations. Monthly sampling thins out forward-filled repeats, but a "
+                "level series still trends and is autocorrelated, so it is not iid. "
                 "Use Log return (%) or First difference for a meaningful read."
             )
 
@@ -407,16 +408,16 @@ with tab_dist:
             caption_parts = []
             if transform == "Log return (%)":
                 caption_parts.append("Values are in % per observation.")
-            if native:
+            if monthly:
                 caption_parts.append(
-                    'Count is after collapsing forward-fill repeats. Turn off "Collapse to native frequency" for the '
+                    'Count is after monthly sampling. Turn off "Collapse to monthly" for the '
                     "full daily count."
                 )
             if caption_parts:
                 st.caption(" ".join(caption_parts))
 
         hist_ctrl = st.columns(3)
-        hist_sig = (variable, transform, native, date_range)
+        hist_sig = (variable, transform, monthly, date_range)
         if st.session_state.get("dist_hist_sig") != hist_sig:
             st.session_state["dist_hist_sig"] = hist_sig
             st.session_state["dist_hist_bins"] = suggest_bins(series)
@@ -484,8 +485,6 @@ with tab_dist:
             )
 
 with tab_rel:
-    st.subheader("Relationships")
-
     if len(base_columns) < 2:
         st.info("Need at least two base variables to explore relationships.")
     else:
@@ -652,8 +651,6 @@ with tab_rel:
                 )
 
 with tab_regime:
-    st.subheader("Regime comparison")
-
     if not regimes:
         st.info(
             "No regime labels are available for this economy and date range. Regimes are "
@@ -673,18 +670,18 @@ with tab_regime:
             help=interpret.REGIME_AVAILABILITY_HELP,
         )
         cmp_alpha = ctrl[3].selectbox("alpha", [0.10, 0.05, 0.01], index=1, key="regime_alpha")
-        cmp_native = st.toggle(
-            "Collapse to native frequency",
+        cmp_monthly = st.toggle(
+            "Collapse to monthly",
             value=True,
+            key="regime_monthly",
             help=(
-                "Drop forward-fill repeats before testing. This is the main defence against "
-                "inflated significance: daily forward-filled data has a huge, artificial "
-                "sample size that pushes every p-value to zero. Note: on held series (policy "
-                'rates) under "First difference" this also removes genuine no-change periods.'
+                "Sample one value per month instead of daily. This is the main defence against "
+                "inflated significance: daily forward-filled data has a huge, artificial sample "
+                "size that pushes every p-value to zero."
             ),
         )
 
-        cmp_series = prepare_series(df[cmp_var], cmp_transform, cmp_native, date_range)
+        cmp_series = prepare_series(df[cmp_var], cmp_transform, cmp_monthly, date_range)
         cmp_label = cmp_var if cmp_transform == "Level" else f"{cmp_var} - {cmp_transform}"
         groups = regimes[group_choice]
 
@@ -755,7 +752,7 @@ with tab_regime:
                 )
             with ctrl_right:
                 hist_ctrl = st.columns([3, 2])
-                hist_sig = (cmp_var, cmp_transform, group_choice, cmp_native, date_range)
+                hist_sig = (cmp_var, cmp_transform, group_choice, cmp_monthly, date_range)
                 if st.session_state.get("regime_hist_sig") != hist_sig:
                     st.session_state["regime_hist_sig"] = hist_sig
                     st.session_state["regime_hist_bins"] = suggest_bins(cmp_series)
@@ -808,8 +805,29 @@ with tab_regime:
 
                 if result["post_hoc"] is not None:
                     st.markdown("**Which regimes differ (Tukey HSD)**")
-                    st.caption("ANOVA follow-up: the specific regime pairs that differ.")
-                    st.dataframe(result["post_hoc"], width="stretch", hide_index=True)
+                    st.caption(
+                        "ANOVA only says *some* regime differs. Tukey HSD checks every pair of "
+                        "regimes and flags which averages are far enough apart to be a real "
+                        "difference, correcting for testing many pairs at once."
+                    )
+                    tukey = result["post_hoc"]
+                    ci_label = f"{1 - cmp_alpha:.0%} CI"
+                    tukey_display = pd.DataFrame(
+                        {
+                            "Regime 1": tukey["group1"].astype(str),
+                            "Regime 2": tukey["group2"].astype(str),
+                            "Mean difference": tukey["meandiff"].astype(float).round(3),
+                            ci_label: [
+                                f"[{lo:.3f}, {hi:.3f}]"
+                                for lo, hi in zip(tukey["lower"].astype(float), tukey["upper"].astype(float))
+                            ],
+                            "p-value (adjusted)": tukey["p-adj"].astype(float).map(interpret.format_pvalue),
+                            "Different?": tukey["reject"].astype(bool).map({True: "Yes", False: "No"}),
+                        }
+                    )
+                    st.dataframe(tukey_display, width="stretch", hide_index=True)
+                    with st.expander("How to read Tukey HSD?"):
+                        st.markdown(interpret.TUKEY_GUIDE)
                 elif len(result["group_sizes"]) >= 3:
                     st.caption(
                         "A pairwise breakdown (which regime differs from which) appears only "
@@ -865,12 +883,11 @@ with tab_regime:
                     f"Each cell counts the days in the selected range that were in both states "
                     f"at once (total {assoc['n']:,} days). These are daily counts, so they "
                     f"won't match the observation counts in the table at the top, which "
-                    f"collapses forward-filled repeats of the selected variable (if selected)."
+                    f"samples the selected variable monthly (if selected)."
                 )
                 st.dataframe(assoc["table"], width="stretch")
 
 with tab_structure:
-    st.subheader("Structure / regimes")
     st.caption(
         "The other tabs use rule-based regimes (policy stance, curve, recession). Here the "
         "data is left to reveal its own structure: collinear features are compressed with PCA, "
@@ -884,8 +901,14 @@ with tab_structure:
         if not st.session_state.get("struct_touched"):
             seed_frame = prepare_frame(df, base_columns, "Level", date_range)
             seed_corr = correlation_matrix(seed_frame, method="spearman")
+            default_cols = regime_source_columns(df, economy)
             if seed_corr is not None:
-                st.session_state["struct_cols"] = representative_features(seed_corr, k=6)
+                for col in representative_features(seed_corr, k=6):
+                    if len(default_cols) >= 6:
+                        break
+                    if col not in default_cols:
+                        default_cols.append(col)
+            st.session_state["struct_cols"] = default_cols[:6]
 
         struct_cols = st.multiselect(
             "Features to cluster on",
@@ -893,7 +916,13 @@ with tab_structure:
             key="struct_cols",
             on_change=freeze_struct_selection,
         )
-        st.caption("Readable default of 6 distinct dimensions. Add features to trade interpretability for coverage.")
+        st.caption(
+            "Default seeds the features the rule-based regimes are built from (policy rate, "
+            "curve spread, recession indicator where available), then fills up with distinct "
+            "extra dimensions, so the cluster-vs-regime comparison below is meaningful. Note it "
+            "is partly circular: clustering on a regime's own inputs will tend to recover it. "
+            "Swap in other features to test how far the structure holds."
+        )
         with st.expander("How is this built?"):
             st.markdown(interpret.STRUCTURE_GUIDE)
 

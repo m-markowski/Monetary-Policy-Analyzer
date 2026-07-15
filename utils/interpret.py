@@ -90,6 +90,22 @@ GROUP_TEST_GUIDE = (
     "overlap a lot, the difference is small in practice even when the p-value is tiny."
 )
 
+TUKEY_GUIDE = (
+    "After ANOVA says *some* regime differs, Tukey HSD (Honestly Significant Difference) "
+    "checks every pair of regimes to find which ones actually differ, while correcting for "
+    "the fact that comparing many pairs at once would otherwise throw up false positives.\n\n"
+    "- **Mean difference** - Regime 2's average minus Regime 1's, in the variable's own units. "
+    "Positive means Regime 2 is higher, negative means lower.\n"
+    "- **Confidence interval** - the plausible range for that difference. When it straddles 0 "
+    "the true gap could be zero, so the difference is not convincing.\n"
+    "- **p-value (adjusted)** - the chance of a gap this large if the two regimes were truly "
+    "identical, already corrected for testing every pair. Below α it counts as a real difference.\n"
+    "- **Different?** - the verdict at your chosen α: 'Yes' when the pair differs (adjusted "
+    "p-value below α, equivalently the interval excludes 0), 'No' otherwise.\n"
+    "- **Reality check:** 'Yes' means the averages differ, not that the gap is large - read the "
+    "mean difference and the box/violin above to judge whether it matters in practice."
+)
+
 ASSOCIATION_GUIDE = (
     "This measures whether two regime labels tend to occur together.\n\n"
     "- **The table** counts the days falling into each combination.\n"

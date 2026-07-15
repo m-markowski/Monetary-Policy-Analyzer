@@ -164,7 +164,7 @@ def compare_groups(
     elif parametric:
         statistic, p_value = stats.f_oneway(*arrays)
         test = "One-way ANOVA"
-        tukey = pairwise_tukeyhsd(frame["value"], frame["group"])
+        tukey = pairwise_tukeyhsd(frame["value"], frame["group"], alpha=alpha)
         post_hoc = pd.DataFrame(tukey.summary().data[1:], columns=tukey.summary().data[0])
     else:
         statistic, p_value = stats.kruskal(*arrays)

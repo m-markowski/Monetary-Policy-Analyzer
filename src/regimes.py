@@ -113,3 +113,21 @@ def available_regimes(df: pd.DataFrame, economy: str) -> dict[str, pd.Series]:
         "Curve state": curve_state(df, economy),
     }
     return {name: series for name, series in candidates.items() if series is not None}
+
+def regime_source_columns(df: pd.DataFrame, economy: str) -> list[str]:
+    """
+    Return the base columns the available regimes are derived from.
+
+    Useful as a default feature set for unsupervised structure analysis, so the
+    data-driven clusters can be compared against the rule-based regimes on the same
+    inputs.
+
+    Args:
+        df (pd.DataFrame): Master dataset to check column availability against.
+        economy (str): Economy identifier ('usa' or 'eurozone').
+
+    Returns:
+        list[str]: The regime-defining columns present in the dataset.
+    """
+    roles = REGIME_COLUMNS.get(economy, {})
+    return [col for col in roles.values() if col and col in df.columns]
