@@ -178,25 +178,35 @@ def prepare_series(level: pd.Series, transform: str, monthly: bool, date_range: 
     return series[(series.index >= start) & (series.index <= end)]
 
 
-def prepare_frame(source: pd.DataFrame, columns: list[str], transform: str, date_range: tuple) -> pd.DataFrame:
+def prepare_frame(
+    source: pd.DataFrame,
+    columns: list[str],
+    transform: str,
+    date_range: tuple,
+    monthly: bool = False,
+) -> pd.DataFrame:
     """
     Build an aligned multi-column frame for the relationship views.
 
-    Applies the transform to each column on the shared daily index (no monthly
-    down-sampling, which would misalign columns), slices to the date range
-    and drops rows with any missing value so every pair is complete.
+    Applies the transform to each column on the shared index, slices to the date
+    range and drops rows with any missing value so every pair is complete. When
+    `monthly` is set, the frame is resampled to month-end first, so the inferential
+    views stop treating forward-filled daily repeats as independent observations.
 
     Args:
         source (pd.DataFrame): Master dataset, date-indexed.
         columns (list[str]): Base-level columns to include.
         transform (str): 'Level' or 'First difference' (valid for every family).
         date_range (tuple): (start_date, end_date) to slice to, inclusive.
+        monthly (bool): Down-sample the frame to month-end before transforming.
 
     Returns:
         pd.DataFrame: Transformed, sliced, missing-dropped frame.
     """
     start, end = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
     frame = source.loc[(source.index >= start) & (source.index <= end), columns]
+    if monthly:
+        frame = frame.resample("ME").last()
     return frame.apply(lambda s: apply_transform(s, transform)).dropna()
 
 
@@ -242,10 +252,12 @@ def representative_features(corr: pd.DataFrame, k: int = 8) -> list[str]:
 
 
 @st.cache_data(show_spinner="Computing PCA and clustering - this can take a few seconds...")
-def run_structure(economy: str, columns: tuple[str, ...], date_range: tuple, mtime: float) -> dict | None:
+def run_structure(
+    economy: str, columns: tuple[str, ...], date_range: tuple, monthly: bool, mtime: float
+) -> dict | None:
     """Standardise the chosen level features and precompute the expensive structure views."""
     source = get_master(economy, mtime)
-    frame = prepare_frame(source, list(columns), "Level", date_range)
+    frame = prepare_frame(source, list(columns), "Level", date_range, monthly=monthly)
     scaled = standardize(frame)
     if scaled is None or scaled.shape[0] < 10:
         return None
@@ -489,13 +501,23 @@ with tab_rel:
         st.info("Need at least two base variables to explore relationships.")
     else:
         rel_transform = "Level"
+        rel_monthly = st.toggle(
+            "Collapse to monthly",
+            value=True,
+            key="rel_monthly",
+            help=(
+                "Sample one value per month instead of daily. Level co-movement barely "
+                "changes, but the cointegration and partial-correlation tests below stop "
+                "treating thousands of forward-filled daily repeats as independent data, "
+                "so their p-values become honest. Turn off for the full daily series."
+            ),
+        )
         st.caption(
-            "Relationships are shown on **levels** as descriptive co-movement. "
-            "First difference is omitted: the macro/rate series are forward-filled "
-            "to daily, so differencing them yields mostly zeros on misaligned dates "
-            "and collapses correlations toward zero (a fill artefact, not absence of "
-            "association). Common trends can still inflate level correlations, so read "
-            "these as descriptive, not causal."
+            "Relationships are read on **levels** as descriptive co-movement, then checked "
+            "(for a chosen pair) for genuine cointegration below. First difference / log "
+            "return are not offered here: cointegration is defined on the levels themselves, "
+            "and a shared trend can still inflate a level correlation, so read the matrix as "
+            "descriptive, not causal."
         )
 
         st.markdown("**Pairwise scatter**")
@@ -516,7 +538,7 @@ with tab_rel:
         if x_var == "None" or y_var == "None":
             st.info("Select Feature X and Feature Y to draw the scatter.")
         else:
-            pair = prepare_frame(df, [x_var, y_var], rel_transform, date_range)
+            pair = prepare_frame(df, [x_var, y_var], rel_transform, date_range, monthly=rel_monthly)
             if color_choice != "None":
                 pair = pair.join(regimes[color_choice].rename("regime"))
             fig_scatter = scatter_ols(
@@ -536,7 +558,7 @@ with tab_rel:
                 st.info("Not enough complete observations for a scatter plot.")
 
             st.markdown("**Is this relationship real or spurious? (stationarity & cointegration)**")
-            coint_pair = prepare_frame(df, [x_var, y_var], rel_transform, date_range)
+            coint_pair = prepare_frame(df, [x_var, y_var], rel_transform, date_range, monthly=rel_monthly)
             coint_res = stationarity_and_cointegration(coint_pair[x_var], coint_pair[y_var])
             if coint_res is None:
                 st.info("Not enough aligned observations for a stationarity test.")
@@ -557,7 +579,7 @@ with tab_rel:
             format_func=str.capitalize,
         )
 
-        full_frame = prepare_frame(df, base_columns, rel_transform, date_range)
+        full_frame = prepare_frame(df, base_columns, rel_transform, date_range, monthly=rel_monthly)
         full_corr = correlation_matrix(full_frame, method=rel_method)
         if full_corr is not None:
             dynamic_default = representative_features(full_corr, k=8)
@@ -590,6 +612,12 @@ with tab_rel:
                 )
                 if fig_corr is not None:
                     st.plotly_chart(fig_corr, width="stretch")
+                    st.caption(
+                        "These are level correlations, so a shared trend can make an "
+                        "unrelated pair look strongly correlated (spurious). To tell genuine "
+                        "co-movement from a trend artefact for a specific pair, use the "
+                        "stationarity & cointegration check above."
+                    )
 
         st.markdown("**Multicollinearity (VIF)**")
         st.caption(
@@ -598,7 +626,7 @@ with tab_rel:
             "VIF ranks how redundant each feature is given every other feature together - the "
             "diagnostic before a linear model. Computed on levels, so a shared trend "
             "lifts every VIF; a term spread is an exact combination of its component yields, so "
-            "an infinite VIF there is correct, not a bug."
+            "VIF > 1000 there is correct, not a bug."
         )
         vif = variance_inflation_factors(full_frame)
         if vif is None:
@@ -632,7 +660,7 @@ with tab_rel:
         elif not covars:
             st.info("Choose at least one control variable to partial out.")
         else:
-            pc_frame = prepare_frame(df, [pc_x, pc_y, *covars], rel_transform, date_range)
+            pc_frame = prepare_frame(df, [pc_x, pc_y, *covars], rel_transform, date_range, monthly=rel_monthly)
             pcorr = partial_correlation(pc_frame, x=pc_x, y=pc_y, covar=covars, method=rel_method)
             if pcorr is None or pc_frame.shape[0] < 3:
                 st.info("Not enough complete observations for a partial correlation.")
@@ -646,8 +674,11 @@ with tab_rel:
                     help=interpret.PARTIAL_P_HELP,
                 )
                 st.caption(
-                    "With thousands of daily rows the p-value is near zero regardless of "
-                    "strength - read the coefficient magnitude, not significance."
+                    "Read the coefficient magnitude, not significance: on the daily series "
+                    "the autocorrelated, forward-filled rows push the p-value toward zero "
+                    "regardless of strength; monthly sampling relieves this. A shared trend "
+                    "can still leave residual association, so cross-check the cointegration "
+                    "verdict above for the pair."
                 )
 
 with tab_regime:
@@ -687,12 +718,12 @@ with tab_regime:
 
         if cmp_transform == "Level":
             st.caption(
-                "On **levels**, this checks whether the usual value of this variable is "
-                "different from one regime to another. Because levels move slowly and "
-                "trend, nearby days are almost identical, so the test behaves as if it has far "
-                "more independent data than it really does and can flag tiny gaps as "
-                "significant. Trust a difference only when the box/violin plots clearly "
-                "separate."
+                "On **levels**, this checks whether the usual value of this variable differs "
+                "from one regime to another. A level series trends and is autocorrelated, so "
+                "the test can over-state significance - strongly with 'Collapse to monthly' "
+                "off, where forward-filled daily repeats act like far more independent data "
+                "than they are, and more mildly even after monthly sampling. Trust a "
+                "difference only when the box/violin plots clearly separate."
             )
         else:
             st.caption(
@@ -881,9 +912,11 @@ with tab_regime:
                 st.markdown(f"**Day counts: {reg_a} (rows) × {reg_b} (columns)**")
                 st.caption(
                     f"Each cell counts the days in the selected range that were in both states "
-                    f"at once (total {assoc['n']:,} days). These are daily counts, so they "
-                    f"won't match the observation counts in the table at the top, which "
-                    f"samples the selected variable monthly (if selected)."
+                    f"at once (total {assoc['n']:,} days). This regime-vs-regime block is "
+                    f"deliberately kept on daily overlap and is not affected by 'Collapse to "
+                    f"monthly' (see the expander above for why), so these counts won't match "
+                    f"the observation counts in the top table, which samples the selected "
+                    f"variable monthly."
                 )
                 st.dataframe(assoc["table"], width="stretch")
 
@@ -891,15 +924,25 @@ with tab_structure:
     st.caption(
         "The other tabs use rule-based regimes (policy stance, curve, recession). Here the "
         "data is left to reveal its own structure: collinear features are compressed with PCA, "
-        "then K-Means groups the days into data-driven regimes. Everything runs on standardised "
+        "then K-Means groups the observations into data-driven regimes. Everything runs on standardised "
         "levels. Read it as description, not a forecast."
     )
 
     if len(base_columns) < 3:
         st.info("Need at least three base variables to explore structure.")
     else:
+        struct_monthly = st.toggle(
+            "Collapse to monthly",
+            value=True,
+            key="struct_monthly",
+            help=(
+                "Cluster on one value per month instead of daily, so held rates and "
+                "forward-filled macro series don't over-weight long flat stretches. "
+                "Turn off to cluster on the full daily series."
+            ),
+        )
         if not st.session_state.get("struct_touched"):
-            seed_frame = prepare_frame(df, base_columns, "Level", date_range)
+            seed_frame = prepare_frame(df, base_columns, "Level", date_range, monthly=struct_monthly)
             seed_corr = correlation_matrix(seed_frame, method="spearman")
             default_cols = regime_source_columns(df, economy)
             if seed_corr is not None:
@@ -929,7 +972,7 @@ with tab_structure:
         if len(struct_cols) < 2:
             st.info("Select at least two features to cluster on.")
         else:
-            bundle = run_structure(economy, tuple(struct_cols), date_range, master_mtime(economy))
+            bundle = run_structure(economy, tuple(struct_cols), date_range, struct_monthly, master_mtime(economy))
             if bundle is None or bundle["pca"] is None or bundle["sweep"] is None:
                 st.info("Not enough overlapping observations for these features and date range.")
             else:

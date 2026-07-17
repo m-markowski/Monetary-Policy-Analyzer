@@ -30,9 +30,12 @@ NORMALITY_GUIDE = (
     "statistic to a critical value at α (smaller statistic = closer to normal).\n"
     "- **Shapiro–Wilk** is shown only for samples ≤ 5000; beyond that its p-value is "
     "unreliable, so it is skipped.\n\n"
-    "*Caveat for this data:* at large sample sizes these tests are so powerful they flag "
-    "tiny, harmless departures, so financial returns almost always test as non-normal. "
-    "Read the QQ plot, histogram and skew/kurtosis for the practical picture.\n\n"
+    "*Caveat for this data:* these tests gain power with sample size. On the full daily "
+    "series (Collapse to monthly off) the huge, forward-filled sample flags tiny, harmless "
+    "departures, so almost everything tests as non-normal. Monthly sampling shrinks the "
+    "sample to a few hundred, so a rejection there is more likely a genuine departure - "
+    "usually the fat tails of financial returns. Either way, read the QQ plot, histogram "
+    "and skew/kurtosis for the practical picture.\n\n"
     "*Note on time-series data:* even first-difference and return series can show "
     "volatility clustering (large moves following large moves), which violates the "
     "independence assumption. The tests remain useful diagnostics but treat the output "
@@ -49,9 +52,10 @@ PARTIAL_P_HELP = (
     "The p-value tests the null hypothesis that the partial correlation is zero - that "
     "once the control variables are accounted for, X and Y have no linear association "
     "left. A small p-value is evidence the leftover association is real rather than "
-    "chance. With thousands of daily, autocorrelated rows the test is over-powered, so p "
-    "is almost always tiny; judge the relationship by the size of the partial r, not by "
-    "significance."
+    "chance. The larger the sample the more over-powered the test - on the daily series "
+    "(thousands of autocorrelated, forward-filled rows) p is almost always tiny, and "
+    "monthly sampling eases this; either way judge the relationship by the size of the "
+    "partial r, not by significance."
 )
 
 OLS_HELP = (
@@ -75,7 +79,7 @@ VIF_HELP = (
 
 GROUP_TEST_GUIDE = (
     "This checks whether a feature has a different typical value from one regime to another.\n\n"
-    "- **Typical value** - usually the average; if the data is skewed or has outliers the "
+    "- **Typical value** - the average unless the data is skewed or has outliers the "
     "test switches to the median, a more robust middle value.\n"
     "- **Which test is used (picked automatically):**\n"
     "    - It first checks whether each regime's values are roughly normally distributed and whether "
@@ -85,9 +89,10 @@ GROUP_TEST_GUIDE = (
     "or more), which need no such assumptions.\n"
     "- **p-value** - the chance of seeing a difference this big if the regimes were truly "
     "identical. **p-value** less than α means the difference is unlikely to be sole luck.\n"
-    "- **Reality check:** with thousands of daily observations the test gets over-sensitive "
-    "and flags even trivial gaps. Always compare against the box/violin - if the boxes "
-    "overlap a lot, the difference is small in practice even when the p-value is tiny."
+    "- **Reality check:** these tests grow over-sensitive as the sample grows - on the full "
+    "daily series (Collapse to monthly off) they flag even trivial gaps, and monthly "
+    "sampling eases but does not remove this. Always compare against the box/violin - if the "
+    "boxes overlap a lot, the difference is small in practice even when the p-value is tiny."
 )
 
 TUKEY_GUIDE = (
@@ -117,8 +122,14 @@ ASSOCIATION_GUIDE = (
     "- **Cramér's V** - rescales the result to a 0-1 strength score, comparable across "
     "tables: 0 = unrelated, 1 = one regime perfectly predicts the other. Rule of thumb: "
     "under 0.1 negligible, 0.1-0.3 weak, 0.3-0.5 moderate, above 0.5 strong.\n"
-    "- **Caveat:** with thousands of daily rows the p-value is almost always tiny, so judge "
-    "by the strength (Cramér's V), not significance alone."
+    "- **Why this stays daily:** the 'Collapse to monthly' toggle above governs the numeric "
+    "variable in the group-comparison test; this block is a separate analysis that compares "
+    "two regime labels directly, on their daily overlap. Collapsing to monthly would not "
+    "rescue the p-value anyway - a regime persists for months, so the labels are heavily "
+    "autocorrelated and the effective sample is far smaller than the row count at any "
+    "frequency.\n"
+    "- **Caveat:** because of that the p-value is almost always tiny whatever the frequency, "
+    "so judge by the strength (Cramér's V), not significance alone."
 )
 
 HOPKINS_HELP = (
@@ -141,10 +152,10 @@ STRUCTURE_GUIDE = (
     "negative one means it moves strongly the opposite way; near 0 means the feature "
     "barely shapes that component. Read each component by the features with the biggest "
     "absolute loadings - they name what the axis represents.\n"
-    "- **K-Means** - splits the days into k groups so each day sits with the days most "
+    "- **K-Means** - splits the observations into k groups so each observation sits with others most "
     "similar to it; the result is a *data-driven* regime, found without the rule-based labels.\n"
     "- **Levels, not returns** - structure is read on standardised levels, so a cluster is a "
-    "persistent state of the economy; neighbouring days sharing a state is expected.\n"
+    "persistent state of the economy; neighbouring observations sharing a state is expected.\n"
 )
 
 CLUSTER_REGIME_HELP = (
@@ -167,8 +178,9 @@ COINTEGRATION_HELP = (
     "whether the leftover residual is stationary: if it is, the pair is cointegrated - tied "
     "together around a stable long-run equilibrium - and the level relationship is genuine. "
     "If not, a high level correlation is most likely an artefact of shared trends. This is "
-    "why differencing is not used here: on forward-filled daily data it collapses to mostly "
-    "zeros, whereas cointegration works directly on the levels."
+    "why differencing is not used here: cointegration is defined on the levels themselves, "
+    "and on the forward-filled daily series a naive difference would in any case collapse "
+    "to mostly zeros."
 )
 
 
