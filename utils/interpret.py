@@ -183,6 +183,224 @@ COINTEGRATION_HELP = (
     "to mostly zeros."
 )
 
+MONTHLY_RATIONALE = (
+    "Modelling runs on a monthly view of the daily data (the month-end snapshot). The targets are "
+    "monthly/meeting-cadence, so the daily rows are mostly forward-filled repeats of the same monthly "
+    "value - keeping them would inflate the sample, leak across the train/test split and make "
+    "cross-validation meaningless. Monthly sampling removes that repetition while leaving the trend "
+    "and autocorrelation intact, so the transform and stationarity discipline still applies."
+)
+
+SPLIT_HELP = (
+    "The data is split in time order (no shuffling) into train, validation and test. Train fits the "
+    "models, validation is used to pick the operating threshold, blend weights and early stopping "
+    "(kept separate so those choices do not peek at the test set), and test is the untouched final "
+    "score. Presets keep validation and test roughly equal in size."
+)
+
+CV_HELP = (
+    "Cross-validation uses `TimeSeriesSplit`: each fold trains on the past and validates on the next "
+    "block."
+)
+
+BUDGET_HELP = (
+    "The training budget controls how hard the search for good hyperparameters works. Fast and "
+    "Balanced use a randomised search over a few / more settings. Thorough uses Optuna (guided "
+    "search, more trials, full roster). The shipped models are pre-tuned - a live run refits them on "
+    "the current data to fight staleness as the dataset grows."
+)
+
+METRIC_HELP = (
+    "The scoring metric drives both model selection and the reported leaderboard. Regression: RMSE "
+    "and MAE are average error sizes (lower is better), R2 is the share of variance explained (higher "
+    "is better). Classification: ROC-AUC (macro, one-vs-rest) measures class separation, F1-macro "
+    "balances precision and recall equally across classes, balanced accuracy averages per-class "
+    "recall - all robust to the Hold-heavy imbalance."
+)
+
+LEAKAGE_HELP = (
+    "When the target is a series (e.g. the policy rate), its own current value and the features "
+    "trivially derived from it (its moving averages, spreads) are removed from the inputs. Otherwise "
+    "the model would 'predict' the future rate from a near-copy of it and score unrealistically well."
+)
+
+TARGET_TRANSFORM_HELP = (
+    "A target transform (log or Yeo-Johnson) can stabilise a skewed, strictly-positive target such as "
+    "inflation or GDP growth. It is never applied to the policy rate or spreads, which pass through "
+    "zero and go negative, so the transform would be undefined."
+)
+
+THRESHOLD_HELP = (
+    "Rather than always taking the highest-probability class, the decision threshold for each class is "
+    "set by Youden's J (the point maximising true-positive minus false-positive rate) on the "
+    "validation set, then applied unchanged to the test set. Tuning it on validation keeps the test "
+    "score honest, and it helps the rare Hike/Cut classes get picked up under the Hold-heavy mix."
+)
+
+DIAG_SPLIT_HELP = (
+    "Choose which chronological split the diagnostics below are measured on. Test is the honest "
+    "out-of-sample read; Dev and Train help you spot overfitting (a large Train-vs-Test gap). The "
+    "per-class decision thresholds are always tuned on Dev regardless of this choice."
+)
+
+LEADERBOARD_HELP = (
+    "Every model is scored on train, validation and test for the chosen metric. Read the test column "
+    "for real-world performance; a model that is excellent on train but weak on test is overfitting. "
+    "The winner badge marks the best validation score - the pick made without touching the test set."
+)
+
+HORIZON_HELP = (
+    "How many months ahead the supervised target looks: the model learns to predict the policy "
+    "decision / value this many months into the future from today's drivers."
+)
+
+TARGET_LEVEL_HELP = (
+    "The regression target is always the forward level of the series (its value the chosen number of "
+    "months ahead). The implied change versus the latest observed level is shown next to the prediction."
+)
+
+NEURAL_HELP = (
+    "The Keras nets (an MLP baseline and an LSTM, optionally a Conv1D) are heavy to fit and prone to "
+    "overfit on this dataset, and they rarely beat the gradient-boosted trees here, so they are "
+    "opt-in. Turn them on to showcase the deep-learning roster; expect the run to take noticeably "
+    "longer."
+)
+
+CV_BUDGET_HELP = (
+    "Hyperparameters are searched with cross-validation on the training split only, in time order "
+    "(`TimeSeriesSplit`). Fast and Balanced use a randomised search (15 and 40 settings); Thorough "
+    "uses Optuna (60 guided trials). The CV score is the mean fold score in the chosen metric. On the "
+    "small monthly sample an early fold can hold a single class, where one-vs-rest ROC-AUC is "
+    "undefined and contributes the chance value 0.5 - so a flat-looking CV number reflects those "
+    "degenerate folds, not a bug."
+)
+
+ENSEMBLE_HELP = (
+    "Both ensembles combine the base models on the validation split. Blend is a weighted average "
+    "whose weights are proportional to each model's inverse validation error, so stronger models "
+    "count more. Stack trains a small meta-model on the base models' validation predictions, learning "
+    "how best to combine them."
+)
+
+ROC_HELP = (
+    "The ROC curve plots the true-positive rate against the false-positive rate as the threshold "
+    "varies, one line per class (one-vs-rest). A curve hugging the top-left is good; the dashed red "
+    "diagonal is random guessing (0.5 = chance, AUC 1 = perfect)."
+)
+
+PR_HELP = (
+    "The precision-recall curve trades off precision (how many predicted positives are correct) "
+    "against recall (how many actual positives are caught), one line per class. A good curve stays "
+    "high and flat toward the top-right; the dotted line is that class's chance level (its base "
+    "rate). It is more informative than ROC when a class is rare, as here. Average precision (AP) is "
+    "the area under it. Jagged or collapsing shapes usually mean very few positives on this split, so "
+    "read that class with caution."
+)
+
+LIFT_HELP = (
+    "Rank the months from most to least confident for a class, then walk down that ranking. Lift is "
+    "how many times more of that class you capture than picking months at random: a lift of 2 across "
+    "the top 10% means that slice holds twice the class's base rate. Curves start high and decay "
+    "toward the dashed line at 1 (random targeting); the longer a curve stays above 1, the more "
+    "useful the model's confidence ranking is."
+)
+
+CONFUSION_HELP = (
+    "The confusion matrix cross-tabulates actual (rows) against predicted (columns) classes. The "
+    "diagonal is correct predictions; off-diagonal cells show what gets confused with what. Normalise "
+    "by row to read it as 'of the actual X, what share did we predict as each class'."
+)
+
+IMPORTANCE_HELP = (
+    "Feature importance ranks the inputs by how much they drive the model, scaled to 0-100. Native "
+    "importance comes from the model itself (tree split gains, or the size of linear coefficients); "
+    "permutation importance shuffles one feature at a time and measures the drop in score, so it is "
+    "model-agnostic and computed on held-out data. They can disagree - native reflects how the model "
+    "was built, permutation reflects what actually helps on unseen data."
+)
+
+GROUP_IMPORTANCE_HELP = (
+    "Importance summed into business blocks instead of individual features, re-scaled to 0-100, so "
+    "you can see which kind of information the model leans on overall. Blocks: Rates - the policy "
+    "rate, Treasury/benchmark yields and yield-curve spreads (rate_/yld_/sprd_); Macro - real-economy "
+    "series such as inflation, unemployment, participation, savings and GDP growth; Market - "
+    "equities, FX, commodities and volatility indices (eq_/fx_/cmd_/idx_)."
+)
+
+SHAP_HELP = (
+    "SHAP values decompose a single prediction into per-feature contributions that add up to the gap "
+    "between that prediction and the average prediction, so you can see which features pushed a given "
+    "decision up or down. Shown for tree/boosting models via the exact TreeExplainer."
+)
+
+PDP_HELP = (
+    "A partial dependence plot shows how the predicted output moves as one feature is varied across "
+    "its range while the others are held at their observed values, i.e. the model's average response "
+    "to that feature. Nearly flat lines are a genuine model reading, not a plotting bug: they mean "
+    "the prediction barely changes as this feature moves, so the model leans on other features "
+    "(common with the Hold-dominated direction target)."
+)
+
+PROB_HIST_HELP = (
+    "Each panel is the distribution of the model's predicted probability for one class, counted over "
+    "the months on this split. Green bars are months that truly belong to that class, red bars the "
+    "rest. Good separation shows green piled near 1 and red near 0; heavy overlap in the middle means "
+    "the model is unsure about that class."
+)
+
+RESIDUAL_HELP = (
+    "A well-specified regression leaves residuals (actual minus predicted) scattered randomly around "
+    "zero. A visible trend or a run of same-sign residuals means the model missed structure; a "
+    "consistent offset means it is biased high or low."
+)
+
+ECON_BASELINE_HELP = (
+    "A statsmodels OLS / Logit fit is shown alongside the machine-learning models as an interpretable "
+    "baseline. It is judged on classical assumptions (coefficient significance, residual normality, "
+    "Durbin-Watson autocorrelation, multicollinearity via the condition number, influential points) "
+    "as well as fit; the ML/DL models are judged on prediction only."
+)
+
+SCENARIO_HELP = (
+    "Move a few key drivers and hold the rest at their latest values to read the model's prediction "
+    "under that scenario. This is a ceteris-paribus what-if, not a forecast: it ignores how the "
+    "drivers move together in reality, so treat it as sensitivity analysis."
+)
+
+FORECAST_HELP = (
+    "These are classic time-series models fit on a single series' own past - target-lags only, with "
+    "none of the Setup feature matrix or the trained ML models. Pick a series and a horizon; the shaded "
+    "band is the confidence interval and it widens further out, because the further ahead the less "
+    "certain the forecast."
+)
+
+FORECAST_INDEPENDENCE = (
+    "This tab is independent of the Setup and Leaderboard tabs: it does not read the trained models, the "
+    "task or the target chosen there. Only the economy carries over, to decide which dataset's series "
+    "you can forecast. The horizon slider below sets how many months ahead these models project and is "
+    "separate from the Setup prediction horizon."
+)
+
+ARIMA_HELP = (
+    "ARIMA/SARIMA models a series from its own past values (AR), past forecast errors (MA) and "
+    "differencing (I) to remove a trend; the seasonal part repeats that at a fixed period. Read the "
+    "ACF/PACF to pick the orders, then check that the residuals look like white noise (Ljung-Box) and "
+    "compare AIC/BIC across candidates (lower is better)."
+)
+
+GARCH_HELP = (
+    "GARCH models the variance rather than the level: it captures volatility clustering, where large "
+    "moves follow large moves. Fit it on a return or change series, not the level. The plot shows the "
+    "estimated conditional volatility over time and its forecast."
+)
+
+VAR_HELP = (
+    "A vector autoregression models several series jointly, each as a function of the recent past of "
+    "all of them, so it captures feedback (e.g. rate <-> inflation <-> unemployment). Impulse "
+    "responses trace how a shock to one series propagates to the others; the variance decomposition "
+    "shows how much of each series' forecast error each shock explains."
+)
+
 
 def scatter_ols_verdict(r: float) -> str:
     """
@@ -505,3 +723,232 @@ def regime_guide(economy: str) -> str:
             "USA only; the Eurozone has no equivalent series here.\n"
         )
     return text
+
+def best_model_sentence(name: str, metric: str, test_score: float | None) -> str:
+    """One-line announcement of the winning model and its test score."""
+    if test_score is None or pd.isna(test_score):
+        return f"Best model: {name} (leading on validation {metric})."
+    return f"Best model: {name}, scoring {test_score:.3f} on the held-out test set ({metric})."
+
+
+def overfit_note(train_score: float | None, test_score: float | None, metric: str) -> str:
+    """Reading of the train-vs-test gap for the chosen metric (sign-aware)."""
+    if train_score is None or test_score is None or pd.isna(train_score) or pd.isna(test_score):
+        return ""
+    higher_better = metric not in ("RMSE", "MAE")
+    gap = train_score - test_score if higher_better else test_score - train_score
+    rel = gap / (abs(train_score) if train_score else 1.0)
+    head = f"Train {metric} {train_score:.3f} vs test {test_score:.3f}: "
+    if rel > 0.25:
+        return head + (
+            "a large gap - the model fits the training window far better than unseen data, a sign of "
+            "overfitting on this small monthly sample."
+        )
+    if rel > 0.1:
+        return head + "a moderate gap; some overfitting, read the test column as the honest score."
+    return head + "train and test are close, so generalisation looks stable."
+
+
+def roc_auc_verdict(auc: float | None, split: str | None = None) -> str:
+    """Band reading of a macro one-vs-rest ROC-AUC, averaged over the classes."""
+    where = f" on the {split.lower()} split" if split else ""
+    if auc is None or pd.isna(auc):
+        return f"ROC-AUC is undefined{where} (a class may be absent from this split)."
+    if auc >= 0.9:
+        band = "excellent"
+    elif auc >= 0.8:
+        band = "strong"
+    elif auc >= 0.7:
+        band = "moderate"
+    elif auc >= 0.6:
+        band = "weak"
+    else:
+        band = "close to chance"
+    return (
+        f"ROC-AUC = {auc:.2f}{where}: {band} separation, averaged one-vs-rest over the classes "
+        "(0.5 = coin flip, 1 = perfect)."
+    )
+
+def confusion_verdict(cm) -> str:
+    """Plain reading of a confusion matrix: overall hit rate and the biggest confusion."""
+    if cm is None or getattr(cm, "empty", True):
+        return ""
+    total = cm.to_numpy().sum()
+    if total == 0:
+        return ""
+    correct = sum(cm.iloc[i, i] for i in range(cm.shape[0]))
+    off = cm.copy()
+    for i in range(off.shape[0]):
+        off.iloc[i, i] = 0
+    note = f"The diagonal holds {correct:.0f} of {total:.0f} correct calls ({correct / total:.0%})."
+    if off.to_numpy().sum() > 0:
+        actual, predicted = off.stack().idxmax()
+        worst = off.stack().max()
+        note += (
+            f" The most common error is predicting {predicted} when the actual outcome is "
+            f"{actual} ({worst:.0f} months)."
+        )
+    return note
+
+def regression_fit_verdict(r2: float | None) -> str:
+    """Band reading of a regression R2."""
+    if r2 is None or pd.isna(r2):
+        return ""
+    if r2 < 0:
+        reading = "worse than just predicting the mean - no usable signal on this split"
+    elif r2 < 0.3:
+        reading = "weak - little of the variation is explained"
+    elif r2 < 0.6:
+        reading = "moderate"
+    elif r2 < 0.8:
+        reading = "strong"
+    else:
+        reading = "very strong - the train-versus-test gap above shows whether it holds out of sample"
+    return f"R2 = {r2:.2f}: {reading}."
+
+def residual_verdict(y_true, y_pred) -> str:
+    """Plain reading of regression residuals: systematic bias and leftover autocorrelation."""
+    actual = pd.Series(y_true).to_numpy(dtype=float)
+    predicted = pd.Series(y_pred).to_numpy(dtype=float)
+    resid = pd.Series(actual - predicted).dropna()
+    if len(resid) < 3:
+        return ""
+    spread = resid.std(ddof=0) or 1.0
+    bias = resid.mean()
+    ac1 = resid.autocorr(lag=1)
+    parts = []
+    if abs(bias) > 0.1 * spread:
+        direction = "over-predicts" if bias < 0 else "under-predicts"
+        parts.append(f"a systematic bias (it {direction} on average)")
+    if ac1 is not None and abs(ac1) > 0.3:
+        parts.append(f"leftover autocorrelation (lag-1 = {ac1:.2f}), so they are not white noise")
+    if not parts:
+        return (
+            "Residuals scatter around zero with no strong pattern, which is what a well-specified "
+            "model looks like."
+        )
+    return "The residuals show " + " and ".join(parts) + "."
+
+def class_balance_note(y) -> str:
+    """Report the class distribution and flag imbalance."""
+    counts = pd.Series(y).value_counts()
+    total = int(counts.sum())
+    if total == 0:
+        return ""
+    parts = ", ".join(f"{lab}: {n} ({n / total:.0%})" for lab, n in counts.items())
+    ratio = counts.max() / counts.min() if counts.min() > 0 else float("inf")
+    if ratio >= 3:
+        tail = (
+            f" The largest class is about {ratio:.0f}x the smallest, so plain accuracy is misleading - "
+            "class weights and the Youden threshold address this."
+        )
+    else:
+        tail = " The classes are reasonably balanced."
+    return f"Class balance - {parts}.{tail}"
+
+
+def importance_sentence(importance: pd.Series | None, top_n: int = 3) -> str:
+    """Name the top-ranked features by an importance measure."""
+    if importance is None or importance.empty:
+        return ""
+    names = ", ".join(importance.head(top_n).index.astype(str))
+    return f"Top drivers: {names} (highest-ranked features by this measure, scaled to 100)."
+
+
+def group_importance_sentence(group_importance: pd.Series | None) -> str:
+    """Name the business block carrying the most predictive signal."""
+    if group_importance is None or group_importance.empty:
+        return ""
+    return f"The {group_importance.index[0]} block contributes the most predictive signal overall."
+
+
+def stationarity_verdict(res: dict | None, name: str) -> str:
+    """Plain reading of an `econometrics.stationarity` ADF result."""
+    if res is None:
+        return f"Not enough observations to test {name} for stationarity."
+    p = format_pvalue(res["p_value"])
+    if res["stationary"]:
+        return f"ADF on {name}: stationary (p = {p}), so it can be modelled without differencing."
+    return (
+        f"ADF on {name}: non-stationary (p = {p}), a trend or unit root remains - difference it or "
+        "model the change instead of the level."
+    )
+
+def target_level_note(res: dict | None, name: str) -> str:
+    """
+    Stationarity reading tailored to the level-only regression target.
+
+    The forward level is predicted from current drivers, not from the target's own past
+    (which is excluded as leakage), so a unit root in the level does not force differencing
+    here; it only warns that the level is persistent and the honest read is the test score.
+
+    Args:
+        res (dict | None): An `econometrics.stationarity` result, or None.
+        name (str): Display name of the target.
+
+    Returns:
+        str: One-line reading of the ADF result for a level target.
+    """
+    if res is None:
+        return f"Not enough observations to test {name} for stationarity."
+    p = format_pvalue(res["p_value"])
+    if res["stationary"]:
+        return f"ADF on {name}: stationary (p = {p}); the forward level is well behaved for modelling."
+    return (
+        f"ADF on {name}: non-stationary (p = {p}). The forward level is predicted from current "
+        "drivers with the target's own history excluded, so this persistence is mitigated rather than "
+        "removed - judge the fit on the held-out test score."
+    )
+
+def ljung_box_verdict(diag: dict, alpha: float = 0.05) -> str:
+    """Reading of the Ljung-Box residual white-noise check from `arima_diagnostics`."""
+    p = format_pvalue(diag["ljung_box_p"])
+    if diag["ljung_box_p"] >= alpha:
+        return f"Ljung-Box p = {p}: the residuals look like white noise, so the model has captured the autocorrelation."
+    return (
+        f"Ljung-Box p = {p} (below α = {alpha:g}): the residuals still carry autocorrelation - the "
+        "order is probably too low."
+    )
+
+def var_lag_sentence(selected_lag: int, ic: str = "aic") -> str:
+    """One line explaining how the VAR lag order was chosen."""
+    return (
+        f"The lag order was selected automatically as {selected_lag}, by minimising the {ic.upper()} "
+        "across the candidate lags shown below."
+    )
+
+def fevd_verdict(data: dict | None) -> str:
+    """Name, at the final horizon, the dominant driver of each series' forecast error variance."""
+    if data is None:
+        return ""
+    names = list(data["names"])
+    decomp = data["decomp"]
+    parts = []
+    for i, name in enumerate(names):
+        shares = list(decomp[i, -1, :])
+        j = max(range(len(shares)), key=lambda k: shares[k])
+        driver = "its own past shocks" if j == i else names[j]
+        parts.append(f"{name} is explained mostly by {driver} ({shares[j]:.0%})")
+    return "At the final horizon, " + "; ".join(parts) + "."
+
+def ols_assumptions_note(ols: dict) -> str:
+    """Plain reading of the OLS residual diagnostics (Durbin-Watson, Jarque-Bera, condition number)."""
+    dw = ols["durbin_watson"]
+    if dw < 1.5:
+        dw_read = f"Durbin-Watson {dw:.2f} (below 1.5) suggests positively autocorrelated residuals"
+    elif dw > 2.5:
+        dw_read = f"Durbin-Watson {dw:.2f} (above 2.5) suggests negatively autocorrelated residuals"
+    else:
+        dw_read = f"Durbin-Watson {dw:.2f} is near 2, so little residual autocorrelation"
+    jb_read = (
+        "residuals depart from normality"
+        if ols["jarque_bera_p"] < 0.05
+        else "residuals are consistent with normality"
+    )
+    cond = ols["condition_number"]
+    cond_read = (
+        "a high condition number warns of multicollinearity among the entered features"
+        if cond > 30
+        else "the condition number is moderate, so little multicollinearity"
+    )
+    return f"{dw_read}; {jb_read} (JB p = {format_pvalue(ols['jarque_bera_p'])}); {cond_read} ({cond:,.0f})."

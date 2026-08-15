@@ -11,6 +11,9 @@ ENV_PATH = PROJECT_ROOT / "config" / ".env"
 
 load_dotenv(dotenv_path=ENV_PATH)
 
+with open(YAML_PATH, "r") as f:
+    SEED = int(yaml.safe_load(f).get("modeling", {}).get("seed", 2026))
+
 
 class EconomyConfig:
     """

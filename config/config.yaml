@@ -73,6 +73,7 @@ economy:
 
 modeling:
   default_start_date: "2000-01-01"
+  seed: 2026
 
 features:
   daily_return_periods: [1, 5, 21, 63, 252]

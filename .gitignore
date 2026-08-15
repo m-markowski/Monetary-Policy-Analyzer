@@ -15,4 +15,4 @@ utils/logs/*
 !logs/.gitkeep
 .egg-info/
 data/cache/*
-
+data/models/*

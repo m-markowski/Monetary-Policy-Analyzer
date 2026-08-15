@@ -803,7 +803,7 @@ def cluster_selection_plot(
         for r in (1, 2):
             fig.add_vline(x=best_k, line_dash="dot", line_color="rgba(0,0,0,0.35)", row=r, col=1)
     fig.update_xaxes(title_text="Number of clusters (k)", dtick=1, row=2, col=1)
-    fig.update_layout(template=TEMPLATE, title=title or "Choosing k", height=460)
+    fig.update_layout(template=TEMPLATE, height=460)
     return fig
 
 
@@ -858,4 +858,686 @@ def projection_scatter(
             hovertemplate="Centroid<br>%{x:.2f}, %{y:.2f}<extra></extra>",
         )
     fig.update_layout(template=TEMPLATE, title=title, legend_title_text="")
+    return fig
+
+def roc_curves(curves: dict, title: str | None = None) -> go.Figure | None:
+    """
+    Per-class one-vs-rest ROC curves with a chance diagonal.
+
+    Args:
+        curves (dict): Output of `evaluate.roc_curve_data` (label -> fpr/tpr/auc).
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if no curve is available.
+    """
+    if not curves:
+        return None
+    fig = go.Figure()
+    for label, d in curves.items():
+        thr = d.get("thresholds")
+        hover = "FPR: %{x:.2f}<br>TPR: %{y:.2f}"
+        if thr is not None:
+            hover += "<br>Threshold: %{customdata:.2f}"
+        fig.add_scatter(
+            x=d["fpr"],
+            y=d["tpr"],
+            mode="lines",
+            name=f"{label} (AUC={d['auc']:.2f})",
+            customdata=thr,
+            hovertemplate=hover + f"<extra>{label}</extra>",
+        )
+    fig.add_scatter(
+        x=[0, 1],
+        y=[0, 1],
+        mode="lines",
+        name="Chance (AUC=0.50)",
+        line={"dash": "dash", "color": "#e45756", "width": 2},
+        hoverinfo="skip",
+    )
+    fig.update_layout(
+        template=TEMPLATE,
+        title=title or "ROC curve",
+        xaxis_title="False positive rate",
+        yaxis_title="True positive rate",
+    )
+    return fig
+
+
+def pr_curves(curves: dict, title: str | None = None) -> go.Figure | None:
+    """
+    Per-class one-vs-rest precision-recall curves (average precision in the legend).
+
+    Args:
+        curves (dict): Output of `evaluate.pr_curve_data` (label -> recall/precision/ap).
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if no curve is available.
+    """
+    if not curves:
+        return None
+    palette = px.colors.qualitative.Plotly
+    fig = go.Figure()
+    for i, (label, d) in enumerate(curves.items()):
+        colour = palette[i % len(palette)]
+        fig.add_scatter(
+            x=d["recall"],
+            y=d["precision"],
+            mode="lines",
+            name=f"{label} (AP={d['ap']:.2f})",
+            line={"color": colour},
+            hovertemplate=f"Recall: %{{x:.2f}}<br>Precision: %{{y:.2f}}<extra>{label}</extra>",
+        )
+        base = d.get("baseline")
+        if base is not None:
+            fig.add_hline(
+                y=base,
+                line_dash="dot",
+                line_color=colour,
+                annotation_text=f"{label} chance ({base:.2f})",
+                annotation_font_size=10,
+            )
+    fig.update_layout(
+        template=TEMPLATE,
+        title=title or "Precision-recall curve",
+        xaxis_title="Recall",
+        yaxis_title="Precision",
+    )
+    return fig
+
+
+def lift_curves(curves: dict, title: str | None = None) -> go.Figure | None:
+    """
+    Per-class cumulative lift curves against a random-targeting baseline.
+
+    Args:
+        curves (dict): Output of `evaluate.lift_curve_data` (label -> fraction/lift).
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if no curve is available.
+    """
+    if not curves:
+        return None
+    fig = go.Figure()
+    for label, d in curves.items():
+        fig.add_scatter(
+            x=d["fraction"],
+            y=d["lift"],
+            mode="lines",
+            name=str(label),
+            hovertemplate=f"Top fraction: %{{x:.2f}}<br>Lift: %{{y:.2f}}x<extra>{label}</extra>",
+        )
+    fig.add_hline(
+        y=1,
+        line_dash="dash",
+        line_color="#e45756",
+        annotation_text="Random targeting (lift = 1)",
+        annotation_font_size=10,
+    )
+    fig.update_layout(
+        template=TEMPLATE,
+        title=title or "Lift curve",
+        xaxis_title="Population targeted (top fraction)",
+        yaxis_title="Lift vs. random",
+    )
+    return fig
+
+
+def confusion_heatmap(
+    cm: pd.DataFrame | None, normalize: bool = False, title: str | None = None
+) -> go.Figure | None:
+    """
+    Confusion matrix as an annotated heatmap (rows = actual, columns = predicted).
+
+    Args:
+        cm (pd.DataFrame | None): Confusion matrix from `classification_metrics`.
+        normalize (bool): Show per-row shares instead of raw counts.
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if the matrix is empty.
+    """
+    if cm is None or cm.empty:
+        return None
+    z = cm.to_numpy(dtype=float)
+    if normalize:
+        row = z.sum(axis=1, keepdims=True)
+        z = np.divide(z, row, out=np.zeros_like(z), where=row > 0)
+    text = np.round(z, 2) if normalize else cm.to_numpy()
+    fmt = ":.2f" if normalize else ""
+    value_label = "Share" if normalize else "Count"
+    heat = go.Heatmap(
+        z=z,
+        x=cm.columns.astype(str),
+        y=cm.index.astype(str),
+        colorscale="Blues",
+        colorbar={"title": value_label},
+        text=text,
+        texttemplate="%{text}",
+        textfont={"size": 12.5, "color": "black"},
+        hovertemplate=f"Actual: %{{y}}<br>Predicted: %{{x}}<br>{value_label}: %{{z{fmt}}}<extra></extra>",
+    )
+    fig = go.Figure(heat)
+    fig.update_layout(
+        template=TEMPLATE,
+        title=title or "Confusion matrix",
+        xaxis_title="Predicted",
+        yaxis_title="Actual",
+    )
+    fig.update_yaxes(autorange="reversed")
+    return fig
+
+
+def importance_bar(
+    importance: pd.Series | None,
+    top_n: int = 15,
+    title: str | None = None,
+    value_label: str = "Importance (0-100)",
+) -> go.Figure | None:
+    """
+    Horizontal bar chart of feature importance (native, permutation or group).
+
+    Args:
+        importance (pd.Series | None): Importance scores, largest first.
+        top_n (int): Number of top features to show.
+        title (str | None): Figure title.
+        value_label (str): X-axis / hover label for the score.
+
+    Returns:
+        go.Figure | None: The figure, or None if there is nothing to plot.
+    """
+    if importance is None or importance.empty:
+        return None
+    top = importance.head(top_n).iloc[::-1]  # largest ends up at the top of a horizontal bar
+    fig = go.Figure(
+        go.Bar(
+            x=top.to_numpy(),
+            y=top.index.astype(str),
+            orientation="h",
+            marker={"color": "#4c78a8"},
+            text=[f"{v:.0f}" for v in top.to_numpy()],
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate=f"%{{y}}<br>{value_label}: %{{x:.1f}}<extra></extra>",
+        )
+    )
+    fig.update_layout(template=TEMPLATE, title=title, xaxis_title=value_label, yaxis_title="")
+    return fig
+
+def class_probability_bar(proba: pd.Series | None, title: str | None = None) -> go.Figure | None:
+    """
+    Vertical bar chart of predicted class probabilities for a single observation.
+
+    Args:
+        proba (pd.Series | None): Probability per class, indexed by class label.
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if there is nothing to plot.
+    """
+    if proba is None or proba.empty:
+        return None
+    labels = proba.index.astype(str)
+    values = proba.to_numpy(dtype=float)
+    fig = go.Figure(
+        go.Bar(
+            x=labels,
+            y=values,
+            marker={"color": "#4c78a8"},
+            text=[f"{v:.1%}" for v in values],
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate="Class %{x}<br>Probability: %{y:.1%}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        template=TEMPLATE,
+        title=title,
+        xaxis_title="Class",
+        yaxis_title="Probability",
+        yaxis={"range": [0, 1], "tickformat": ".0%"},
+    )
+    return fig
+
+
+def probability_histogram(
+    y_proba,
+    labels,
+    y_true=None,
+    bins: int = 25,
+    title: str | None = None,
+) -> go.Figure | None:
+    """
+    Per-class predicted-probability histograms, split by true membership.
+
+    One panel per class shows the distribution of the model's predicted probability
+    for that class; when `y_true` is given, samples that truly belong to the class
+    are separated from the rest, so good separation shows two well-split humps.
+
+    Args:
+        y_proba: Predicted probabilities (n_samples x n_classes).
+        labels (list): Ordered label set matching the probability columns.
+        y_true: Observed labels (optional; enables the positive/negative split).
+        bins (int): Histogram bins per panel.
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if there are no probabilities.
+    """
+    y_proba = np.asarray(y_proba, dtype=float)
+    if y_proba.size == 0:
+        return None
+    n = len(labels)
+    fig = make_subplots(
+        rows=1, cols=n, shared_yaxes=True, subplot_titles=[f"P({lab})" for lab in labels]
+    )
+    y_true = np.asarray(y_true) if y_true is not None else None
+    xbins = {"start": 0.0, "end": 1.0, "size": 1.0 / bins}
+    for j, lab in enumerate(labels):
+        col = y_proba[:, j]
+        if y_true is not None:
+            fig.add_histogram(
+                x=col[y_true == lab],
+                name="Belongs to this class",
+                legendgroup="pos",
+                showlegend=j == 0,
+                marker_color="#54a24b",
+                opacity=0.65,
+                xbins=xbins,
+                hovertemplate="Predicted P: %{x:.2f}<br>Months: %{y}<extra>Belongs</extra>",
+                row=1,
+                col=j + 1,
+            )
+            fig.add_histogram(
+                x=col[y_true != lab],
+                name="Other classes",
+                legendgroup="neg",
+                showlegend=j == 0,
+                marker_color="#e45756",
+                opacity=0.65,
+                xbins=xbins,
+                hovertemplate="Predicted P: %{x:.2f}<br>Months: %{y}<extra>Other</extra>",
+                row=1,
+                col=j + 1,
+            )
+        else:
+            fig.add_histogram(
+                x=col,
+                showlegend=False,
+                marker_color="#4c78a8",
+                xbins=xbins,
+                hovertemplate="Predicted P: %{x:.2f}<br>Months: %{y}<extra></extra>",
+                row=1,
+                col=j + 1,
+            )
+    fig.update_layout(
+        template=TEMPLATE,
+        title=title or "Predicted probability by class",
+        barmode="overlay",
+        legend_title_text="",
+    )
+    fig.update_xaxes(title_text="Predicted probability", range=[0, 1])
+    fig.update_yaxes(title_text="Count", col=1)
+    return fig
+
+def predicted_vs_actual(y_true, y_pred, index=None, title: str | None = None) -> go.Figure | None:
+    """
+    Actual vs predicted values over the sample (a path for the monthly frame).
+
+    Args:
+        y_true: Observed target values.
+        y_pred: Predicted target values.
+        index: X-axis values (dates); a positional range if None.
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if there is no data.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    if y_true.size == 0:
+        return None
+    x = index if index is not None else np.arange(len(y_true))
+    fig = go.Figure()
+    fig.add_scatter(x=x, y=y_true, mode="lines+markers", name="Actual", line={"color": "#1f77b4"})
+    fig.add_scatter(
+        x=x, y=y_pred, mode="lines+markers", name="Predicted", line={"color": "#d62728", "dash": "dash"}
+    )
+    fig.update_layout(template=TEMPLATE, title=title or "Predicted vs actual", yaxis_title="")
+    fig.update_traces(yhoverformat=".2f")
+    return fig
+
+
+def residual_plot(y_true, y_pred, index=None, title: str | None = None) -> go.Figure | None:
+    """
+    Residuals (actual - predicted) over the sample with a zero reference line.
+
+    Args:
+        y_true: Observed target values.
+        y_pred: Predicted target values.
+        index: X-axis values (dates); a positional range if None.
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if there is no data.
+    """
+    resid = np.asarray(y_true, dtype=float) - np.asarray(y_pred, dtype=float)
+    if resid.size == 0:
+        return None
+    x = index if index is not None else np.arange(len(resid))
+    fig = go.Figure()
+    fig.add_scatter(x=x, y=resid, mode="markers", name="Residual", marker={"color": "#4c78a8"})
+    fig.add_hline(y=0, line_dash="dash", line_color="rgba(0,0,0,0.4)")
+    fig.update_layout(
+        template=TEMPLATE, title=title or "Residuals (actual - predicted)", yaxis_title="Residual"
+    )
+    fig.update_traces(yhoverformat=".2f")
+    return fig
+
+
+def forecast_fan(
+    history: pd.Series | None,
+    forecast: dict | None,
+    title: str | None = None,
+    name: str = "Series",
+) -> go.Figure | None:
+    """
+    History line plus a forecast mean and a shaded widening confidence band.
+
+    Args:
+        history (pd.Series | None): Recent observed values, date-indexed.
+        forecast (dict | None): 'mean'/'lower'/'upper' Series over the forecast
+            index (from `arima_forecast`, or one column of `var_forecast`).
+        title (str | None): Figure title.
+        name (str): Series name used in the default title.
+
+    Returns:
+        go.Figure | None: The figure, or None if there is no forecast.
+    """
+    if forecast is None:
+        return None
+    mean = forecast["mean"]
+    if mean is None or len(mean) == 0:
+        return None
+    lower, upper = forecast["lower"], forecast["upper"]
+    idx = list(mean.index)
+    fig = go.Figure()
+    if history is not None and len(history) > 0:
+        h = pd.Series(history).dropna()
+        fig.add_scatter(x=h.index, y=h.to_numpy(), mode="lines", name="History", line={"color": "#1f77b4"})
+    fig.add_scatter(
+        x=idx + idx[::-1],
+        y=list(np.asarray(upper)) + list(np.asarray(lower)[::-1]),
+        fill="toself",
+        fillcolor="rgba(214,39,40,0.15)",
+        line={"color": "rgba(255,255,255,0)"},
+        name="Confidence interval",
+        hoverinfo="skip",
+    )
+    fig.add_scatter(
+        x=idx, y=np.asarray(mean), mode="lines", name="Forecast", line={"color": "#d62728", "dash": "dash"}
+    )
+    fig.update_layout(template=TEMPLATE, title=title or f"Forecast - {name}", yaxis_title="")
+    fig.update_traces(yhoverformat=".2f")
+    return fig
+
+
+def acf_pacf_plot(data: dict | None, title: str | None = None) -> go.Figure | None:
+    """
+    Stacked ACF and PACF stem plots with a shaded significance band.
+
+    Args:
+        data (dict | None): Output of `econometrics.acf_pacf` (lags/acf/acf_ci/
+            pacf/pacf_ci); the confidence bounds are re-centred on zero for display.
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if the input is missing.
+    """
+    if data is None:
+        return None
+    lags = np.asarray(data["lags"])
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.12, subplot_titles=["ACF", "PACF"])
+    for row, key, ci_key in [(1, "acf", "acf_ci"), (2, "pacf", "pacf_ci")]:
+        vals = np.asarray(data[key])
+        ci = np.asarray(data[ci_key])
+        band_low = ci[:, 0] - vals  # centre the band on zero, statsmodels returns it around each value
+        band_high = ci[:, 1] - vals
+        fig.add_scatter(
+            x=list(lags) + list(lags[::-1]),
+            y=list(band_high) + list(band_low[::-1]),
+            fill="toself",
+            fillcolor="rgba(0,0,0,0.08)",
+            line={"color": "rgba(255,255,255,0)"},
+            showlegend=False,
+            hoverinfo="skip",
+            row=row,
+            col=1,
+        )
+        fig.add_bar(
+            x=lags,
+            y=vals,
+            marker_color="#4c78a8",
+            width=0.15,
+            showlegend=False,
+            hovertemplate=f"Lag %{{x}}<br>{key.upper()}: %{{y:.2f}}<extra></extra>",
+            row=row,
+            col=1,
+        )
+    fig.update_xaxes(title_text="Lag", dtick=1, row=2, col=1)
+    fig.update_layout(template=TEMPLATE, title=title or "ACF / PACF", height=460)
+    return fig
+
+
+def garch_volatility_plot(
+    forecast: dict | None, forecast_index=None, title: str | None = None
+) -> go.Figure | None:
+    """
+    In-sample conditional volatility with an optional forecast continuation.
+
+    Args:
+        forecast (dict | None): Output of `econometrics.garch_forecast`
+            ('fitted_volatility' Series, 'horizon', 'volatility').
+        forecast_index: Dates for the forecast horizon; when given, the forecast
+            volatility is drawn on the same date axis after the in-sample part.
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if the input is missing.
+    """
+    if forecast is None:
+        return None
+    fitted = forecast["fitted_volatility"]
+    fig = go.Figure()
+    if fitted is not None and len(fitted) > 0:
+        fig.add_scatter(
+            x=fitted.index, y=fitted.to_numpy(), mode="lines", name="In-sample volatility", line={"color": "#1f77b4"}
+        )
+    x = forecast_index if forecast_index is not None else forecast["horizon"]
+    fig.add_scatter(
+        x=x,
+        y=forecast["volatility"],
+        mode="lines+markers",
+        name="Forecast volatility",
+        line={"color": "#d62728", "dash": "dash"},
+    )
+    fig.update_layout(template=TEMPLATE, title=title or "Conditional volatility (GARCH)", yaxis_title="Volatility")
+    fig.update_traces(yhoverformat=".3f")
+    return fig
+
+def irf_grid(data: dict | None, title: str | None = None) -> go.Figure | None:
+    """
+    Grid of impulse response functions for a fitted VAR.
+
+    Row i, column j traces the response of series i to a one-time shock in series j
+    across the forecast horizon, with a zero reference line per panel.
+
+    Args:
+        data (dict | None): Output of `econometrics.var_irf` ('steps'/'names'/'irfs',
+            the last with shape (steps + 1, n, n)).
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if the input is missing.
+    """
+    if data is None:
+        return None
+    steps = np.asarray(data["steps"])
+    names = list(data["names"])
+    irfs = np.asarray(data["irfs"])
+    n = len(names)
+    fig = make_subplots(
+        rows=n,
+        cols=n,
+        shared_xaxes=True,
+        column_titles=[f"Shock: {name}" for name in names],
+        row_titles=[f"Response: {name}" for name in names],
+        vertical_spacing=0.09,
+        horizontal_spacing=0.07,
+    )
+    for i in range(n):
+        for j in range(n):
+            fig.add_scatter(
+                x=steps,
+                y=irfs[:, i, j],
+                mode="lines",
+                line={"color": "#4c78a8"},
+                showlegend=False,
+                hovertemplate=f"{names[j]} -> {names[i]}<br>Step %{{x}}<br>Response: %{{y:.3f}}<extra></extra>",
+                row=i + 1,
+                col=j + 1,
+            )
+            fig.add_hline(y=0, line_dash="dash", line_color="rgba(0,0,0,0.3)", row=i + 1, col=j + 1)
+    fig.update_layout(template=TEMPLATE, title=title or "Impulse responses", height=240 * n)
+    fig.update_annotations(font_size=11)
+    fig.update_xaxes(title_text="Steps ahead", row=n)
+    return fig
+
+
+def fevd_area(data: dict | None, title: str | None = None) -> go.Figure | None:
+    """
+    Forecast error variance decomposition as stacked areas, one panel per series.
+
+    Each panel shows, across the horizon, the share of that series' forecast error
+    variance attributable to a shock in each series (the shares sum to one).
+
+    Args:
+        data (dict | None): Output of `econometrics.var_fevd` ('steps'/'names'/
+            'decomp', the last with shape (n, steps, n)).
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if the input is missing.
+    """
+    if data is None:
+        return None
+    steps = np.asarray(data["steps"])
+    names = list(data["names"])
+    decomp = np.asarray(data["decomp"])
+    n = len(names)
+    palette = px.colors.qualitative.Plotly
+    fig = make_subplots(
+        rows=n,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        subplot_titles=[f"{name} forecast error" for name in names],
+    )
+    for i in range(n):
+        for j in range(n):
+            fig.add_scatter(
+                x=steps,
+                y=decomp[i, :, j],
+                mode="lines",
+                stackgroup=f"row{i}",
+                name=names[j],
+                legendgroup=names[j],
+                showlegend=i == 0,
+                line={"color": palette[j % len(palette)]},
+                hovertemplate=f"Shock {names[j]}<br>Step %{{x}}<br>Share: %{{y:.2f}}<extra></extra>",
+                row=i + 1,
+                col=1,
+            )
+    fig.update_layout(template=TEMPLATE, title=title or "Variance decomposition", height=240 * n)
+    fig.update_yaxes(range=[0, 1], title_text="Share")
+    fig.update_xaxes(title_text="Steps ahead", row=n, col=1)
+    return fig
+
+def shap_local_bar(contributions: pd.Series | None, top_n: int = 12, title: str | None = None) -> go.Figure | None:
+    """
+    Signed SHAP contributions for a single observation as a horizontal bar.
+
+    Positive contributions (green) push the prediction above the average, negative
+    (red) pull it below; the largest-magnitude features are shown.
+
+    Args:
+        contributions (pd.Series | None): Signed per-feature SHAP values.
+        top_n (int): Number of largest-magnitude features to show.
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if there is nothing to plot.
+    """
+    if contributions is None or contributions.empty:
+        return None
+    order = contributions.abs().sort_values(ascending=False).index
+    top = contributions.reindex(order).head(top_n).iloc[::-1]
+    colors = ["#54a24b" if v >= 0 else "#e45756" for v in top.to_numpy()]
+    fig = go.Figure(
+        go.Bar(
+            x=top.to_numpy(),
+            y=top.index.astype(str),
+            orientation="h",
+            marker={"color": colors},
+            hovertemplate="%{y}<br>SHAP: %{x:+.3f}<extra></extra>",
+        )
+    )
+    fig.add_vline(x=0, line_color="rgba(0,0,0,0.4)")
+    fig.update_layout(
+        template=TEMPLATE,
+        title=title or "Local SHAP contributions",
+        xaxis_title="Contribution to prediction",
+        yaxis_title="",
+    )
+    return fig
+
+
+def partial_dependence_plot(
+    data: dict | None, labels=None, feature: str | None = None, title: str | None = None
+) -> go.Figure | None:
+    """
+    Partial dependence line(s) for one feature.
+
+    One line for regression; one line per class for multiclass classification.
+
+    Args:
+        data (dict | None): Output of `explain.partial_dependence_data` ('grid' and
+            'average', one row per output).
+        labels (list | None): Class labels for a multi-row average.
+        feature (str | None): Feature name for the axis label.
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if there is no data.
+    """
+    if data is None:
+        return None
+    grid = np.asarray(data["grid"])
+    average = np.asarray(data["average"])
+    if average.ndim == 1:
+        average = average[None, :]
+    fig = go.Figure()
+    for i in range(average.shape[0]):
+        name = str(labels[i]) if labels is not None and i < len(labels) else "Prediction"
+        fig.add_scatter(x=grid, y=average[i], mode="lines", name=name)
+    fig.update_layout(
+        template=TEMPLATE,
+        title=title or f"Partial dependence - {feature}",
+        xaxis_title=feature,
+        yaxis_title="Average prediction",
+        showlegend=average.shape[0] > 1,
+    )
+    fig.update_traces(xhoverformat=".3f", yhoverformat=".3f")
     return fig

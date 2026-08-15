@@ -493,18 +493,8 @@ class EconomyDataLoader:
             ],
             "eurozone": [
                 ("sprd_10y_ib3m", "yld_10y_gov", "rate_ib_3m", "Long vs short-term expectations"),
-                (
-                    "sprd_10y_ecb",
-                    "yld_10y_gov",
-                    "rate_ecb_dep",
-                    "Policy restrictiveness vs long end",
-                ),
-                (
-                    "psprd_ib_3m_ecb",
-                    "rate_ib_3m",
-                    "rate_ecb_dep",
-                    "Market expectations vs ECB stance",
-                ),
+                ("sprd_10y_ecb", "yld_10y_gov", "rate_ecb_dep", "Policy restrictiveness vs long end"),
+                ("psprd_ib_3m_ecb", "rate_ib_3m", "rate_ecb_dep", "Market expectations vs ECB stance"),
             ],
         }
         for out, a, b, desc in specs.get(self.economy, []):
@@ -515,7 +505,7 @@ class EconomyDataLoader:
                         "base": out,
                         "frequency": "derived",
                         "families": {"spread": [f"{a} - {b}"]},
-                        "desc": desc,
+                        "description": desc,
                     }
                 )
             else:
@@ -524,7 +514,7 @@ class EconomyDataLoader:
                     {
                         "feature": out,
                         "reason": f"missing input(s): {', '.join(missing)} (dropped as stale)",
-                        "desc": desc,
+                        "description": desc,
                     }
                 )
         return df

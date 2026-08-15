@@ -1,0 +1,217 @@
+import keras
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.utils.class_weight import compute_class_weight
+from config.settings import SEED
+
+
+def make_sequences(values: np.ndarray, lookback: int) -> np.ndarray:
+    """
+    Turn a 2D feature array into overlapping look-back windows for sequence models.
+
+    Row i maps to the window ending at i; the first rows are left-padded by
+    repeating the first observation so the output has one window per input row.
+
+    Args:
+        values (np.ndarray): Scaled feature matrix (n_samples x n_features).
+        lookback (int): Window length in rows (months on the monthly frame).
+
+    Returns:
+        np.ndarray: Windows of shape (n_samples, lookback, n_features).
+    """
+    n = values.shape[0]
+    padded = np.vstack([np.repeat(values[:1], lookback - 1, axis=0), values])
+    return np.stack([padded[i : i + lookback] for i in range(n)], axis=0)
+
+
+def build_network(kind, input_shape, n_outputs, task, units, dropout, l2, learning_rate):
+    """
+    Compile a small regularized Keras network for one task.
+
+    Args:
+        kind (str): 'mlp', 'lstm' or 'conv1d'.
+        input_shape (tuple): (n_features,) for MLP, (lookback, n_features) otherwise.
+        n_outputs (int): Number of classes (classification) or 1 (regression).
+        task (str): 'regression' or 'classification'.
+        units (int): Width of the main layer.
+        dropout (float): Dropout rate after each block.
+        l2 (float): L2 kernel penalty.
+        learning_rate (float): Adam learning rate.
+
+    Returns:
+        keras.Model: The compiled model.
+    """
+    reg = keras.regularizers.l2(l2)
+    model = keras.Sequential([keras.layers.Input(shape=input_shape)])
+    if kind == "mlp":
+        model.add(keras.layers.Dense(units, activation="relu", kernel_regularizer=reg))
+        model.add(keras.layers.Dropout(dropout))
+        model.add(keras.layers.Dense(units // 2, activation="relu", kernel_regularizer=reg))
+        model.add(keras.layers.Dropout(dropout))
+    elif kind == "lstm":
+        model.add(keras.layers.LSTM(units, kernel_regularizer=reg))
+        model.add(keras.layers.Dropout(dropout))
+    elif kind == "conv1d":
+        model.add(keras.layers.Conv1D(units, kernel_size=3, padding="causal", activation="relu", kernel_regularizer=reg))
+        model.add(keras.layers.GlobalAveragePooling1D())
+        model.add(keras.layers.Dropout(dropout))
+
+    if task == "classification":
+        model.add(keras.layers.Dense(n_outputs, activation="softmax"))
+        loss, metrics = "sparse_categorical_crossentropy", ["accuracy"]
+    else:
+        model.add(keras.layers.Dense(1))
+        loss, metrics = "mse", ["mae"]
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate), loss=loss, metrics=metrics)
+    return model
+
+
+class KerasEstimator:
+    """
+    sklearn-style wrapper around a small Keras network (MLP / LSTM / Conv1D).
+
+    Standardisation and (for the sequence kinds) windowing are handled internally,
+    so the estimator consumes the same 2D feature frame as the sklearn roster and
+    exposes `predict` / `predict_proba` for the shared evaluation path.
+    """
+
+    def __init__(
+        self,
+        task,
+        kind="mlp",
+        lookback=6,
+        units=32,
+        dropout=0.2,
+        l2=1e-3,
+        learning_rate=1e-3,
+        epochs=300,
+        batch_size=16,
+        class_weight=True,
+        random_state=SEED,
+    ):
+        self.task = task
+        self.kind = kind
+        self.lookback = lookback
+        self.units = units
+        self.dropout = dropout
+        self.l2 = l2
+        self.learning_rate = learning_rate
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.class_weight = class_weight
+        self.random_state = random_state
+
+    def transform_inputs(self, X) -> np.ndarray:
+        scaled = self.scaler_.transform(np.asarray(X, dtype=float))
+        if self.kind in ("lstm", "conv1d"):
+            return make_sequences(scaled, self.lookback)
+        return scaled
+
+    def fit(self, X, y):
+        keras.utils.set_random_seed(self.random_state)
+        # Seeds the Python/NumPy/TF RNGs. GPU kernels and some parallel ops stay
+        # nondeterministic, so neural runs are close but not bit-identical.
+        values = np.asarray(X, dtype=float)
+        self.scaler_ = StandardScaler().fit(values)
+        prepared = self.transform_inputs(X)
+        input_shape = prepared.shape[1:]
+
+        weights = None
+        if self.task == "classification":
+            self.classes_ = np.unique(y)
+            n_outputs = len(self.classes_)
+            target = np.searchsorted(self.classes_, y)
+            if self.class_weight:
+                balanced = compute_class_weight("balanced", classes=self.classes_, y=np.asarray(y))
+                weights = {i: w for i, w in enumerate(balanced)}
+        else:
+            n_outputs = 1
+            target = np.asarray(y, dtype=float)
+
+        self.model_ = build_network(
+            self.kind, input_shape, n_outputs, self.task, self.units, self.dropout, self.l2, self.learning_rate
+        )
+        callbacks = [
+            keras.callbacks.EarlyStopping(patience=25, restore_best_weights=True),
+            keras.callbacks.ReduceLROnPlateau(patience=10, factor=0.5, min_lr=1e-5),
+        ]
+        self.model_.fit(
+            prepared,
+            target,
+            validation_split=0.2,
+            epochs=self.epochs,
+            batch_size=self.batch_size,
+            callbacks=callbacks,
+            class_weight=weights,
+            shuffle=False,
+            verbose=0,
+        )
+        return self
+
+    def predict_proba(self, X) -> np.ndarray:
+        return self.model_.predict(self.transform_inputs(X), verbose=0)
+
+    def predict(self, X) -> np.ndarray:
+        if self.task == "classification":
+            return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
+        return self.model_.predict(self.transform_inputs(X), verbose=0).ravel()
+
+
+def neural_models(task, lookback=6, class_weight=True, random_state=SEED, include_conv=False) -> dict:
+    """
+    Build the (unfitted) neural roster for one task.
+
+    Args:
+        task (str): 'regression' or 'classification'.
+        lookback (int): Window length for the sequence models.
+        class_weight (bool): Balance classes during training (classification).
+        random_state (int): Seed.
+        include_conv (bool): Add the optional Conv1D model.
+
+    Returns:
+        dict: Model name -> unfitted KerasEstimator.
+    """
+    common = {"class_weight": class_weight, "random_state": random_state}
+    roster = {
+        "MLP": KerasEstimator(task, kind="mlp", **common),
+        "LSTM": KerasEstimator(task, kind="lstm", lookback=lookback, **common),
+    }
+    if include_conv:
+        roster["Conv1D"] = KerasEstimator(task, kind="conv1d", lookback=lookback, **common)
+    return roster
+
+
+def fit_neural_models(X, y, task, *, models=None, lookback=6, class_weight=True, random_state=SEED, include_conv=False, progress=None) -> dict:
+    """
+    Fit the neural roster on the training split.
+
+    Neural nets use fixed, heavily-regularized configurations with early stopping
+    rather than a hyperparameter search, so this mirrors `train_roster` but skips
+    the CV search.
+
+    Args:
+        X, y: Training split (y label-encoded for classification, matching the
+            sklearn roster so predictions align in the shared leaderboard).
+        task (str): 'regression' or 'classification'.
+        models (list | None): Subset of neural names to fit (all if None).
+        lookback (int): Window length for the sequence models.
+        class_weight (bool): Balance classes during training (classification).
+        random_state (int): Seed.
+        include_conv (bool): Include the optional Conv1D model.
+        progress (callable | None): Called as progress(done, total, name, None).
+
+    Returns:
+        dict: Model name -> fitted KerasEstimator.
+    """
+    roster = neural_models(task, lookback=lookback, class_weight=class_weight, random_state=random_state, include_conv=include_conv)
+    if models:
+        roster = {name: est for name, est in roster.items() if name in models}
+
+    fitted = {}
+    total = len(roster)
+    for done, (name, estimator) in enumerate(roster.items(), start=1):
+        estimator.fit(X, y)
+        fitted[name] = estimator
+        if progress:
+            progress(done, total, name, None)
+    return fitted

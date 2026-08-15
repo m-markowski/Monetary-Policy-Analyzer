@@ -49,10 +49,10 @@ def render_economy_card(meta: dict) -> None:
     eco = meta["economy"].upper()
     st.subheader(eco)
     c1, c2, c3 = st.columns(3)
-    c1.metric("Working range", f"{meta['working_start']} — {meta['working_end']}")
+    c1.metric("Working range", f"{meta['working_start']} - {meta['working_end']}")
     c2.metric("Rows", f"{meta['n_rows']:,}")
     c3.metric("Features", meta["n_features"])
-    st.caption(f"Raw (levels) range: {meta['raw_start']} — {meta['raw_end']}. Built {meta['built_at']}")
+    st.caption(f"Raw (levels) range: {meta['raw_start']} - {meta['raw_end']}. Built {meta['built_at']}")
 
     dropped = meta["dropped_fred"] + meta["dropped_tickers"]
     if dropped:
