@@ -38,8 +38,10 @@ def roc_auc_ovr_scorer(estimator, X, y) -> float:
     """
     y = np.asarray(y)
     proba = np.asarray(estimator.predict_proba(X), dtype=float)
+    # Blend/Stack expose no classes_; their probability columns are the full encoded class set.
+    classes = getattr(estimator, "classes_", np.arange(proba.shape[1]))
     aucs = []
-    for col, cls in enumerate(estimator.classes_):
+    for col, cls in enumerate(classes):
         binary = (y == cls).astype(int)
         if binary.sum() in (0, len(binary)):
             continue
@@ -229,6 +231,7 @@ def roc_curve_data(y_true, y_proba, labels) -> dict:
         if binary.sum() in (0, len(binary)): # cannot compute for either lab count = 0 or lab count = len(binary)
             continue
         fpr, tpr, thr = roc_curve(binary, y_proba[:, j])
+        thr = np.minimum(thr, 1.0)  # sklearn sets thresholds[0] = inf; clamp so the hover reads 1.00
         out[lab] = {
             "fpr": fpr,
             "tpr": tpr,
@@ -333,3 +336,76 @@ def build_leaderboard(models, splits, task, labels=None, thresholds=None) -> pd.
                 row[f"{split_name} Balanced accuracy"] = metrics["Balanced accuracy"]
         records.append(row)
     return pd.DataFrame(records).set_index("Model")
+
+def naive_baseline_rows(splits, task, labels=None, momentum=None) -> pd.DataFrame:
+    """
+    Score the naive baselines across the splits, in leaderboard column format.
+
+    Regression assumes a forward-change target: predicting zero change everywhere is
+    the no-change random walk. Classification scores the train-split majority class
+    and, when a momentum series is given, the trailing-momentum labels from
+    `targets.momentum_baseline`. Hard-label baselines carry no probabilities, so
+    their ROC-AUC is left missing.
+
+    Args:
+        splits (dict): Split name ('Train'/'Valid'/'Test') -> (X, y).
+        task (str): 'regression' or 'classification'.
+        labels (list | None): Ordered label set (classification only).
+        momentum (pd.Series | None): Trailing-momentum labels on the monthly index,
+            already encoded like y (classification only).
+
+    Returns:
+        pd.DataFrame: One row per baseline, same columns as `build_leaderboard`.
+    """
+    if task == "regression":
+        row = {"Model": "Baseline: no change"}
+        for split_name, (X, y) in splits.items():
+            for metric, value in regression_metrics(y, np.zeros(len(y))).items():
+                row[f"{split_name} {metric}"] = value
+        return pd.DataFrame([row]).set_index("Model")
+
+    majority = pd.Series(splits["Train"][1]).mode().iloc[0]
+    predictions = {"Baseline: majority class": lambda X, y: np.full(len(y), majority, dtype=float)}
+    if momentum is not None:
+        predictions["Baseline: trailing momentum"] = (
+            lambda X, y: momentum.reindex(X.index).to_numpy(dtype=float)
+        )
+    records = []
+    for name, predict in predictions.items():
+        row = {"Model": name}
+        for split_name, (X, y) in splits.items():
+            pred = predict(X, y)
+            known = ~np.isnan(pred)  # momentum is NA in its first warm-up months
+            metrics = classification_metrics(np.asarray(y)[known], pred[known].astype(int), labels)
+            row[f"{split_name} ROC-AUC (macro/OvR)"] = np.nan
+            row[f"{split_name} F1-macro"] = metrics["F1-macro"]
+            row[f"{split_name} Balanced accuracy"] = metrics["Balanced accuracy"]
+        records.append(row)
+    return pd.DataFrame(records).set_index("Model")
+
+
+def skill_vs_naive(board: pd.DataFrame, baseline: str = "Baseline: no change") -> pd.DataFrame | None:
+    """
+    Per-split regression skill relative to the naive no-change baseline.
+
+    Skill = 1 - MSE_model / MSE_naive, derived from the board's RMSE columns. Zero
+    means no better than predicting no change, 1 is a perfect fit and negative is
+    worse than naive - the honest yardstick where R2 explodes on near-constant
+    windows.
+
+    Args:
+        board (pd.DataFrame): Leaderboard including the baseline row.
+        baseline (str): Index label of the naive baseline row.
+
+    Returns:
+        pd.DataFrame | None: '<Split> Skill vs naive' columns indexed like `board`,
+        or None if the baseline row is missing.
+    """
+    if baseline not in board.index:
+        return None
+    out = {}
+    for col in board.columns:
+        if col.endswith(" RMSE"):
+            split = col[: -len(" RMSE")]
+            out[f"{split} Skill vs naive"] = 1.0 - board[col] ** 2 / board.loc[baseline, col] ** 2
+    return pd.DataFrame(out)

@@ -1,3 +1,6 @@
+import tempfile
+from pathlib import Path
+
 import keras
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -73,6 +76,11 @@ class KerasEstimator:
     Standardisation and (for the sequence kinds) windowing are handled internally,
     so the estimator consumes the same 2D feature frame as the sklearn roster and
     exposes `predict` / `predict_proba` for the shared evaluation path.
+
+    Pickling is supported: the Keras network cannot survive pickle on its own, so
+    `__getstate__` serialises it with Keras' native `.keras` format and
+    `__setstate__` rebuilds it, letting the registry persist the neural roster
+    alongside the sklearn models in one artifact.
     """
 
     def __init__(
@@ -155,6 +163,25 @@ class KerasEstimator:
         if self.task == "classification":
             return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
         return self.model_.predict(self.transform_inputs(X), verbose=0).ravel()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        network = state.pop("model_", None)
+        if network is not None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "network.keras"
+                network.save(path)
+                state["model_bytes_"] = path.read_bytes()
+        return state
+
+    def __setstate__(self, state):
+        blob = state.pop("model_bytes_", None)
+        self.__dict__.update(state)
+        if blob is not None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "network.keras"
+                path.write_bytes(blob)
+                self.model_ = keras.models.load_model(path)
 
 
 def neural_models(task, lookback=6, class_weight=True, random_state=SEED, include_conv=False) -> dict:

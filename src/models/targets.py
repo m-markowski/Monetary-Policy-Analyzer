@@ -81,6 +81,34 @@ def direction_target(df: pd.DataFrame, economy: str, horizon: int, deadband: flo
     labels[forward_change.isna()] = pd.NA
     return labels.astype("category").rename("policy_direction")
 
+def momentum_baseline(df: pd.DataFrame, economy: str, horizon: int, deadband: float = 0.125) -> pd.Series | None:
+    """
+    Naive trailing-momentum prediction for the direction target.
+
+    Extrapolates the most recent move: the label at month t is the deadband sign of
+    the change over the *previous* `horizon` months (rate(t) - rate(t-horizon)), so
+    it uses only information available at prediction time - the feasible naive
+    counterpart of `direction_target`, which looks forward.
+
+    Args:
+        df (pd.DataFrame): Monthly modelling frame containing the policy-rate column.
+        economy (str): Economy identifier ('usa' or 'eurozone').
+        horizon (int): Number of rows (months on the monthly frame) to look back.
+        deadband (float): Minimum absolute rate change (in points) to count as a move.
+
+    Returns:
+        pd.Series | None: Categorical labels ('Hike', 'Hold', 'Cut'), or None if the
+        policy-rate column is unavailable.
+    """
+    col = CURATED_TARGETS.get(economy, {}).get("Policy rate", {}).get("column")
+    if col is None or col not in df.columns:
+        return None
+    trailing_change = df[col] - df[col].shift(horizon)
+    labels = pd.Series("Hold", index=df.index, dtype="object")
+    labels[trailing_change > deadband] = "Hike"
+    labels[trailing_change < -deadband] = "Cut"
+    labels[trailing_change.isna()] = pd.NA
+    return labels.astype("category").rename("momentum_baseline")
 
 def value_target(df: pd.DataFrame, column: str, horizon: int, kind: str = "change") -> pd.Series | None:
     """

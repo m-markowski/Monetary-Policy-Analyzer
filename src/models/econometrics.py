@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 from arch import arch_model
+from scipy.stats import norm
 from statsmodels.stats.diagnostic import acorr_ljungbox
-from statsmodels.tsa.api import VAR
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.stattools import acf, adfuller, pacf
 import statsmodels.api as sm
@@ -13,7 +13,7 @@ def stationarity(series: pd.Series, regression: str = "c") -> dict | None:
     """
     Augmented Dickey-Fuller stationarity test for one series.
 
-    Tested first so ARIMA differencing / VAR levels-vs-changes choices are honest.
+    Tested first so the ARIMA differencing choice is honest.
 
     Args:
         series (pd.Series): Series to test.
@@ -37,30 +37,28 @@ def stationarity(series: pd.Series, regression: str = "c") -> dict | None:
 
 def acf_pacf(series: pd.Series, nlags: int = 24, alpha: float = 0.05) -> dict | None:
     """
-    ACF and PACF coordinates (with confidence bands) for order identification.
+    ACF and PACF values (lags 1+) with a fixed white-noise significance bound.
+
+    Lag 0 is dropped (it equals 1 by definition) and the bound is the constant
+    +-z/sqrt(n) white-noise band used for order identification.
 
     Args:
         series (pd.Series): Series to analyse.
         nlags (int): Requested number of lags (capped at n/2 - 1).
-        alpha (float): Confidence level for the bands (0.05 -> 95%).
+        alpha (float): Significance level for the bound (0.05 -> 95%).
 
     Returns:
-        dict | None: 'lags', 'acf', 'acf_ci', 'pacf', 'pacf_ci', or None if the
-        series is too short for even one lag.
+        dict | None: 'lags' (1..nlags), 'acf', 'pacf' and the scalar 'conf', or
+        None if the series is too short for even one lag.
     """
     values = pd.Series(series).dropna()
     nlags = min(nlags, len(values) // 2 - 1)
     if nlags < 1:
         return None
-    acf_vals, acf_ci = acf(values, nlags=nlags, alpha=alpha, fft=True)
-    pacf_vals, pacf_ci = pacf(values, nlags=nlags, alpha=alpha)
-    return {
-        "lags": np.arange(nlags + 1),
-        "acf": acf_vals,
-        "acf_ci": acf_ci,
-        "pacf": pacf_vals,
-        "pacf_ci": pacf_ci,
-    }
+    acf_vals = acf(values, nlags=nlags, fft=True)
+    pacf_vals = pacf(values, nlags=nlags)
+    conf = float(norm.ppf(1 - alpha / 2) / np.sqrt(len(values)))
+    return {"lags": np.arange(1, nlags + 1), "acf": acf_vals[1:], "pacf": pacf_vals[1:], "conf": conf}
 
 
 def fit_arima(series: pd.Series, order=(1, 0, 0), seasonal_order=(0, 0, 0, 0)):
@@ -151,7 +149,7 @@ def fit_garch(series: pd.Series, p: int = 1, q: int = 1, dist: str = "t"):
     if len(values) < 50:
         return None
     try:
-        model = arch_model(values, mean="Constant", vol="GARCH", p=p, q=q, dist=dist)
+        model = arch_model(values, mean="Constant", vol="GARCH", p=p, q=q, dist=dist, rescale=True)
         return model.fit(disp="off")
     except (ValueError, np.linalg.LinAlgError):
         return None
@@ -166,102 +164,51 @@ def garch_forecast(result, steps: int = 12) -> dict:
         steps (int): Forecast horizon.
 
     Returns:
-        dict: 'horizon' (1..steps), 'volatility' (forecast conditional std dev) and
-        'fitted_volatility' (in-sample conditional std dev for context).
+        dict: 'horizon' (1..steps), 'volatility' (forecast conditional std dev),
+        'fitted_volatility' (in-sample conditional std dev for context) and 'persistence' (the α+β sum, which sets how
+        fast the forecast reverts to the long-run volatility).
     """
+    scale = getattr(result, "scale", 1.0)
     forecast = result.forecast(horizon=steps, reindex=False)
     variance = forecast.variance.iloc[-1].to_numpy()
+    persistence = float(sum(v for k, v in result.params.items() if k.startswith(("alpha[", "beta["))))
     return {
         "horizon": np.arange(1, steps + 1),
-        "volatility": np.sqrt(variance),
-        "fitted_volatility": pd.Series(result.conditional_volatility, index=result.resid.index),
+        "volatility": np.sqrt(variance) / scale,
+        "fitted_volatility": pd.Series(result.conditional_volatility / scale, index=result.resid.index),
+        "persistence": persistence,
     }
 
-
-def fit_var(frame: pd.DataFrame, maxlags: int = 6, ic: str = "aic"):
+def arima_candidate(values: pd.Series, order: tuple, seasonal_order: tuple) -> dict | None:
     """
-    Fit a small vector autoregression over a handful of aligned series.
+    Fit one ARIMA/SARIMA candidate and summarise it for the order-search leaderboard.
 
     Args:
-        frame (pd.DataFrame): Aligned multivariate series (e.g. rate/inflation/
-            unemployment), month-end-indexed.
-        maxlags (int): Maximum lag order to consider.
-        ic (str): Information criterion for lag selection ('aic', 'bic', 'hqic').
+        values (pd.Series): Clean series the search runs on.
+        order (tuple): (p, d, q) non-seasonal order.
+        seasonal_order (tuple): (P, D, Q, s) seasonal order (s=0 disables it).
 
     Returns:
-        The fitted VAR result, or None if fewer than 30 rows or fewer than 2 columns.
+        dict | None: 'Order', 'Seasonal', 'AIC', 'BIC' and 'Ljung-Box p', or None
+        if the fit fails.
     """
-    data = frame.dropna()
-    if data.shape[0] < 30 or data.shape[1] < 2:
-        return None
     try:
-        return VAR(data).fit(maxlags=maxlags, ic=ic)
+        res = ARIMA(values, order=order, seasonal_order=seasonal_order).fit()
     except (ValueError, np.linalg.LinAlgError):
         return None
-
-
-def var_forecast(result, steps: int = 12, alpha: float = 0.05) -> dict:
-    """
-    Forecast every VAR series with confidence intervals.
-
-    Args:
-        result: Fitted VAR result from `fit_var`.
-        steps (int): Forecast horizon.
-        alpha (float): Confidence level for the intervals.
-
-    Returns:
-        dict: 'mean', 'lower', 'upper' (each a DataFrame, one column per series).
-    """
-    history = result.endog[-result.k_ar :]
-    mid, lower, upper = result.forecast_interval(history, steps=steps, alpha=alpha)
-    names = result.names
+    resid = pd.Series(res.resid).dropna()
+    try:
+        lb_p = float(acorr_ljungbox(resid, lags=[12], return_df=True)["lb_pvalue"].iloc[0])
+    except (ValueError, IndexError):
+        lb_p = float("nan")
     return {
-        "mean": pd.DataFrame(mid, columns=names),
-        "lower": pd.DataFrame(lower, columns=names),
-        "upper": pd.DataFrame(upper, columns=names),
+        "Order": order,
+        "Seasonal": seasonal_order,
+        "AIC": float(res.aic),
+        "BIC": float(res.bic),
+        "Ljung-Box p": lb_p,
     }
 
-
-def var_irf(result, steps: int = 12, orthogonalized: bool = True) -> dict:
-    """
-    Impulse response functions for a fitted VAR.
-
-    Args:
-        result: Fitted VAR result from `fit_var`.
-        steps (int): Number of response periods.
-        orthogonalized (bool): Use orthogonalized (Cholesky) shocks.
-
-    Returns:
-        dict: 'steps', 'names' and 'irfs' with shape (steps + 1, n, n); element
-        [t, i, j] is the response of series i to a shock in series j at horizon t.
-    """
-    irf = result.irf(steps)
-    return {
-        "steps": np.arange(steps + 1),
-        "names": result.names,
-        "irfs": irf.orth_irfs if orthogonalized else irf.irfs,
-    }
-
-
-def var_fevd(result, steps: int = 12) -> dict:
-    """
-    Forecast error variance decomposition for a fitted VAR.
-
-    Args:
-        result: Fitted VAR result from `fit_var`.
-        steps (int): Number of horizons.
-
-    Returns:
-        dict: 'steps', 'names' and 'decomp' with shape (n, steps, n); element
-        [i, t, j] is the share of series i's forecast error variance at horizon t
-        attributable to series j.
-    """
-    fevd = result.fevd(steps)
-    return {
-        "steps": np.arange(1, steps + 1),
-        "names": result.names,
-        "decomp": fevd.decomp,
-    }
 
 def arima_order_search(
     series: pd.Series,
@@ -270,13 +217,16 @@ def arima_order_search(
     max_q: int = 3,
     ic: str = "aic",
     top: int = 8,
+    seasonal_period: int = 12,
 ) -> dict | None:
     """
-    Small Box-Jenkins grid search over ARIMA (p, d, q) orders.
+    Small Box-Jenkins grid search over ARIMA orders, with SARIMA candidates.
 
-    Fits every order on the grid, ranks them by the chosen information criterion and
-    reports a compact leaderboard so the automatic pick is auditable. Differencing is
-    left to the grid rather than forced, so a stationary series can still select d = 0.
+    Stage one fits every non-seasonal (p, d, q) on the grid; stage two adds a small
+    set of seasonal orders on top of the three best non-seasonal candidates, so
+    SARIMA competes in the same leaderboard without an exhaustive (and slow) joint
+    grid. Differencing is left to the grid rather than forced, so a stationary
+    series can still select d = 0.
 
     Args:
         series (pd.Series): Series to model (month-end-indexed for the monthly view).
@@ -285,10 +235,12 @@ def arima_order_search(
         max_q (int): Largest MA order to try.
         ic (str): Ranking criterion ('aic' or 'bic').
         top (int): Number of candidate orders to keep in the leaderboard.
+        seasonal_period (int): Seasonal period for the stage-two candidates.
 
     Returns:
-        dict | None: 'best' (p, d, q), 'ic' and a 'leaderboard' DataFrame
-        (Order/AIC/BIC/Ljung-Box p, best first), or None if n < 20 or nothing fits.
+        dict | None: 'best' (p, d, q), 'best_seasonal' (P, D, Q, s), 'ic' and a
+        'leaderboard' DataFrame (Order/Seasonal/AIC/BIC/Ljung-Box p, best first),
+        or None if n < 20 or nothing fits.
     """
     values = pd.Series(series).dropna()
     if len(values) < 20:
@@ -299,22 +251,24 @@ def arima_order_search(
             for q in range(max_q + 1):
                 if p == 0 and q == 0:
                     continue
-                try:
-                    res = ARIMA(values, order=(p, d, q)).fit()
-                except (ValueError, np.linalg.LinAlgError):
-                    continue
-                resid = pd.Series(res.resid).dropna()
-                try:
-                    lb_p = float(acorr_ljungbox(resid, lags=[12], return_df=True)["lb_pvalue"].iloc[0])
-                except (ValueError, IndexError):
-                    lb_p = float("nan")
-                rows.append(
-                    {"Order": (p, d, q), "AIC": float(res.aic), "BIC": float(res.bic), "Ljung-Box p": lb_p}
-                )
+                row = arima_candidate(values, (p, d, q), (0, 0, 0, 0))
+                if row is not None:
+                    rows.append(row)
     if not rows:
         return None
+    plain = pd.DataFrame(rows).sort_values(ic.upper())
+    for order in plain["Order"].head(3):
+        for P, D, Q in ((1, 0, 0), (0, 0, 1), (1, 0, 1)):
+            row = arima_candidate(values, tuple(order), (P, D, Q, seasonal_period))
+            if row is not None:
+                rows.append(row)
     leaderboard = pd.DataFrame(rows).sort_values(ic.upper()).reset_index(drop=True)
-    return {"best": leaderboard.loc[0, "Order"], "ic": ic, "leaderboard": leaderboard.head(top)}
+    return {
+        "best": leaderboard.loc[0, "Order"],
+        "best_seasonal": leaderboard.loc[0, "Seasonal"],
+        "ic": ic,
+        "leaderboard": leaderboard.head(top),
+    }
 
 
 def garch_order_search(
@@ -342,7 +296,7 @@ def garch_order_search(
     for p in range(1, max_p + 1):
         for q in range(1, max_q + 1):
             try:
-                res = arch_model(values, mean="Constant", vol="GARCH", p=p, q=q, dist=dist).fit(disp="off")
+                res = arch_model(values, mean="Constant", vol="GARCH", p=p, q=q, dist=dist, rescale=True).fit(disp="off")
             except (ValueError, np.linalg.LinAlgError):
                 continue
             rows.append({"Order": (p, q), "AIC": float(res.aic), "BIC": float(res.bic)})
@@ -351,33 +305,80 @@ def garch_order_search(
     leaderboard = pd.DataFrame(rows).sort_values(ic.upper()).reset_index(drop=True)
     return {"best": leaderboard.loc[0, "Order"], "ic": ic, "leaderboard": leaderboard.head(top)}
 
-
-def var_order_table(frame: pd.DataFrame, maxlags: int = 6) -> pd.DataFrame | None:
+def arima_backtest(series: pd.Series, order=(1, 0, 0), seasonal_order=(0, 0, 0, 0), holdout: int = 12) -> dict | None:
     """
-    Information criteria per VAR lag order, to audit the automatic lag choice.
+    Holdout accuracy check for one ARIMA specification.
+
+    The displayed forecast model is fit on the full series; this side-fit refits the
+    same specification without the last `holdout` observations, forecasts them and
+    reports the errors, so accuracy is measured on data the fit never saw.
 
     Args:
-        frame (pd.DataFrame): Aligned multivariate series, month-end-indexed.
-        maxlags (int): Largest lag order to evaluate.
+        series (pd.Series): Series to model (month-end-indexed for the monthly view).
+        order (tuple): (p, d, q) non-seasonal order.
+        seasonal_order (tuple): (P, D, Q, s) seasonal order (s=0 disables it).
+        holdout (int): Number of trailing observations held out and forecast.
 
     Returns:
-        pd.DataFrame | None: One row per lag (1..maxlags) with AIC/BIC/HQIC indexed by
-        lag, or None if fewer than 30 rows or fewer than 2 columns remain.
+        dict | None: 'holdout', 'rmse', 'mae' (holdout forecast errors) and
+        'train_rmse', 'train_mae' (in-sample one-step errors of the training fit),
+        or None if the training window falls under 20 rows or the fit fails.
     """
-    data = frame.dropna()
-    if data.shape[0] < 30 or data.shape[1] < 2:
+    values = pd.Series(series).dropna()
+    if len(values) - holdout < 20:
         return None
-    model = VAR(data)
-    rows = []
-    for lag in range(1, maxlags + 1):
-        try:
-            res = model.fit(lag)
-        except (ValueError, np.linalg.LinAlgError):
-            continue
-        rows.append({"Lag": lag, "AIC": float(res.aic), "BIC": float(res.bic), "HQIC": float(res.hqic)})
-    if not rows:
+    train, test = values.iloc[:-holdout], values.iloc[-holdout:]
+    try:
+        res = ARIMA(train, order=order, seasonal_order=seasonal_order).fit()
+    except (ValueError, np.linalg.LinAlgError):
         return None
-    return pd.DataFrame(rows).set_index("Lag")
+    errors = test.to_numpy() - np.asarray(res.get_forecast(steps=holdout).predicted_mean)
+    resid = np.asarray(res.resid)
+    return {
+        "holdout": int(holdout),
+        "rmse": float(np.sqrt(np.mean(errors**2))),
+        "mae": float(np.mean(np.abs(errors))),
+        "train_rmse": float(np.sqrt(np.mean(resid**2))),
+        "train_mae": float(np.mean(np.abs(resid))),
+    }
+
+
+def garch_backtest(series: pd.Series, p: int = 1, q: int = 1, dist: str = "t", holdout: int = 12) -> dict | None:
+    """
+    Holdout accuracy check for one GARCH specification.
+
+    Refits on all but the last `holdout` changes, forecasts their volatility and
+    compares it to the realized absolute demeaned changes - a noisy but standard
+    proxy, since true volatility is never directly observed.
+
+    Args:
+        series (pd.Series): Return or change series (roughly zero-mean).
+        p (int): GARCH lag order (variance).
+        q (int): ARCH lag order (squared residuals).
+        dist (str): Innovation distribution passed to `arch_model`.
+        holdout (int): Number of trailing observations held out and forecast.
+
+    Returns:
+        dict | None: 'holdout', 'rmse' and 'mae' in the modelled series' units, or
+        None if the training window falls under 50 rows or the fit fails.
+    """
+    values = pd.Series(series).dropna()
+    if len(values) - holdout < 50:
+        return None
+    train, test = values.iloc[:-holdout], values.iloc[-holdout:]
+    try:
+        res = arch_model(train, mean="Constant", vol="GARCH", p=p, q=q, dist=dist, rescale=True).fit(disp="off")
+    except (ValueError, np.linalg.LinAlgError):
+        return None
+    scale = getattr(res, "scale", 1.0)
+    volatility = np.sqrt(res.forecast(horizon=holdout, reindex=False).variance.iloc[-1].to_numpy()) / scale
+    realized = np.abs(test.to_numpy() - float(res.params["mu"]) / scale)
+    errors = realized - volatility
+    return {
+        "holdout": int(holdout),
+        "rmse": float(np.sqrt(np.mean(errors**2))),
+        "mae": float(np.mean(np.abs(errors))),
+    }
 
 def top_correlated_features(X: pd.DataFrame, target: pd.Series, k: int) -> list[str]:
     """

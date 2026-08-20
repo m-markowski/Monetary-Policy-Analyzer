@@ -67,7 +67,8 @@ def build_matrix(
         min_rows (int): Minimum complete rows required to return a usable matrix.
 
     Returns:
-        dict | None: 'X' (dates x features) and 'y' (aligned target), or None if
+        dict | None: 'X' (dates x features), 'y' (aligned target) and 'X_latest'
+        (the most recent complete feature row, possibly unlabelled), or None if
         fewer than `min_rows` complete rows remain.
     """
     exclude = set(leakage_columns(list(monthly.columns), target_column))
@@ -83,8 +84,12 @@ def build_matrix(
         for lag in target_lags:
             features[f"{target_column}_lag{lag}"] = base.shift(lag)
 
-    combined = features.join(y.rename("__target__"), how="inner").dropna()
+    complete = features.dropna()
+    combined = complete.join(y.rename("__target__"), how="inner").dropna()
     if combined.shape[0] < min_rows:
         return None
     target = combined.pop("__target__")
-    return {"X": combined, "y": target}
+    # The last complete feature row may be newer than the last labelled row (the
+    # forward target is unknown for the final `horizon` months); it is the natural
+    # anchor for a live scenario prediction.
+    return {"X": combined, "y": target, "X_latest": complete.iloc[[-1]]}

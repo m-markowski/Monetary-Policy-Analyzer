@@ -122,8 +122,9 @@ def save_artifacts(models: dict, metadata: dict, key: str, directory: Path = MOD
     Serialise the fitted models and their metadata sidecar.
 
     Args:
-        models (dict): Model name -> fitted (picklable) estimator. Exclude Keras
-            estimators, which are refit live rather than shipped.
+        models (dict): Model name -> fitted estimator. Keras wrappers are safe to
+            include: `KerasEstimator` pickles by serialising its network with
+            Keras' native `.keras` format, so the whole roster round-trips.
         metadata (dict): Output of `build_metadata`.
         key (str): Artifact key from `cache_key`.
         directory (Path): Destination directory (created if absent).

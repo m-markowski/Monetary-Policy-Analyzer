@@ -1012,7 +1012,7 @@ def confusion_heatmap(
         z=z,
         x=cm.columns.astype(str),
         y=cm.index.astype(str),
-        colorscale="Blues",
+        colorscale=[[0.0, "#f5f5f5"], [1.0, "#FF4B4B"]],
         colorbar={"title": value_label},
         text=text,
         texttemplate="%{text}",
@@ -1063,7 +1063,7 @@ def importance_bar(
             hovertemplate=f"%{{y}}<br>{value_label}: %{{x:.1f}}<extra></extra>",
         )
     )
-    fig.update_layout(template=TEMPLATE, title=title, xaxis_title=value_label, yaxis_title="")
+    fig.update_layout(template=TEMPLATE, title=title or "", xaxis_title=value_label, yaxis_title="")
     return fig
 
 def class_probability_bar(proba: pd.Series | None, title: str | None = None) -> go.Figure | None:
@@ -1114,7 +1114,7 @@ def probability_histogram(
 
     One panel per class shows the distribution of the model's predicted probability
     for that class; when `y_true` is given, samples that truly belong to the class
-    are separated from the rest, so good separation shows two well-split humps.
+    are separated from the rest, stacked in each bin, so good separation shows green piled near 1 and red near 0.
 
     Args:
         y_proba: Predicted probabilities (n_samples x n_classes).
@@ -1144,7 +1144,6 @@ def probability_histogram(
                 legendgroup="pos",
                 showlegend=j == 0,
                 marker_color="#54a24b",
-                opacity=0.65,
                 xbins=xbins,
                 hovertemplate="Predicted P: %{x:.2f}<br>Months: %{y}<extra>Belongs</extra>",
                 row=1,
@@ -1156,7 +1155,6 @@ def probability_histogram(
                 legendgroup="neg",
                 showlegend=j == 0,
                 marker_color="#e45756",
-                opacity=0.65,
                 xbins=xbins,
                 hovertemplate="Predicted P: %{x:.2f}<br>Months: %{y}<extra>Other</extra>",
                 row=1,
@@ -1175,7 +1173,7 @@ def probability_histogram(
     fig.update_layout(
         template=TEMPLATE,
         title=title or "Predicted probability by class",
-        barmode="overlay",
+        barmode="stack",
         legend_title_text="",
     )
     fig.update_xaxes(title_text="Predicted probability", range=[0, 1])
@@ -1200,10 +1198,12 @@ def predicted_vs_actual(y_true, y_pred, index=None, title: str | None = None) ->
     if y_true.size == 0:
         return None
     x = index if index is not None else np.arange(len(y_true))
+    # Markers help on a short test window but clutter a 400-month span
+    mode = "lines+markers" if y_true.size <= 60 else "lines"
     fig = go.Figure()
-    fig.add_scatter(x=x, y=y_true, mode="lines+markers", name="Actual", line={"color": "#1f77b4"})
+    fig.add_scatter(x=x, y=y_true, mode=mode, name="Actual", line={"color": "#1f77b4"})
     fig.add_scatter(
-        x=x, y=y_pred, mode="lines+markers", name="Predicted", line={"color": "#d62728", "dash": "dash"}
+        x=x, y=y_pred, mode=mode, name="Predicted", line={"color": "#d62728", "dash": "dash"}
     )
     fig.update_layout(template=TEMPLATE, title=title or "Predicted vs actual", yaxis_title="")
     fig.update_traces(yhoverformat=".2f")
@@ -1236,6 +1236,40 @@ def residual_plot(y_true, y_pred, index=None, title: str | None = None) -> go.Fi
     fig.update_traces(yhoverformat=".2f")
     return fig
 
+def cooks_distance_plot(cooks: pd.Series | None, threshold: float, title: str | None = None) -> go.Figure | None:
+    """
+    Cook's distance per observation with the 4/n rule-of-thumb threshold line.
+
+    Args:
+        cooks (pd.Series | None): Cook's distance per observation, date-indexed.
+        threshold (float): The 4/n flagging threshold.
+        title (str | None): Figure title.
+
+    Returns:
+        go.Figure | None: The figure, or None if there is no data.
+    """
+    if cooks is None or len(cooks) == 0:
+        return None
+    fig = go.Figure(
+        go.Bar(
+            x=cooks.index,
+            y=cooks.to_numpy(),
+            marker={"color": "#4c78a8"},
+            hovertemplate="%{x|%Y-%m}<br>Cook's distance: %{y:.4f}<extra></extra>",
+        )
+    )
+    fig.add_hline(
+        y=threshold,
+        line_dash="dash",
+        line_color="#d62728",
+        annotation_text="4/n threshold",
+        annotation_position="top left",
+    )
+    fig.update_layout(
+        template=TEMPLATE, title=title or "Cook's distance by month", yaxis_title="Cook's distance", xaxis_title=""
+    )
+    return fig
+
 
 def forecast_fan(
     history: pd.Series | None,
@@ -1249,7 +1283,7 @@ def forecast_fan(
     Args:
         history (pd.Series | None): Recent observed values, date-indexed.
         forecast (dict | None): 'mean'/'lower'/'upper' Series over the forecast
-            index (from `arima_forecast`, or one column of `var_forecast`).
+            index (from `arima_forecast`).
         title (str | None): Figure title.
         name (str): Series name used in the default title.
 
@@ -1263,10 +1297,13 @@ def forecast_fan(
         return None
     lower, upper = forecast["lower"], forecast["upper"]
     idx = list(mean.index)
+    mean_x, mean_y = idx, list(np.asarray(mean))
     fig = go.Figure()
     if history is not None and len(history) > 0:
         h = pd.Series(history).dropna()
         fig.add_scatter(x=h.index, y=h.to_numpy(), mode="lines", name="History", line={"color": "#1f77b4"})
+        mean_x = [h.index[-1], *idx]
+        mean_y = [float(h.iloc[-1]), *mean_y]
     fig.add_scatter(
         x=idx + idx[::-1],
         y=list(np.asarray(upper)) + list(np.asarray(lower)[::-1]),
@@ -1277,7 +1314,7 @@ def forecast_fan(
         hoverinfo="skip",
     )
     fig.add_scatter(
-        x=idx, y=np.asarray(mean), mode="lines", name="Forecast", line={"color": "#d62728", "dash": "dash"}
+        x=mean_x, y=mean_y, mode="lines", name="Forecast", line={"color": "#d62728", "dash": "dash"}
     )
     fig.update_layout(template=TEMPLATE, title=title or f"Forecast - {name}", yaxis_title="")
     fig.update_traces(yhoverformat=".2f")
@@ -1286,11 +1323,13 @@ def forecast_fan(
 
 def acf_pacf_plot(data: dict | None, title: str | None = None) -> go.Figure | None:
     """
-    Stacked ACF and PACF stem plots with a shaded significance band.
+    Stacked ACF and PACF stem plots with fixed significance bounds.
+
+    Lags start at 1 (lag 0 equals 1 by definition) and the dashed red lines mark
+    the constant white-noise bound +-z/sqrt(n), which does not widen with the lag.
 
     Args:
-        data (dict | None): Output of `econometrics.acf_pacf` (lags/acf/acf_ci/
-            pacf/pacf_ci); the confidence bounds are re-centred on zero for display.
+        data (dict | None): Output of `econometrics.acf_pacf` (lags/acf/pacf/conf).
         title (str | None): Figure title.
 
     Returns:
@@ -1299,26 +1338,12 @@ def acf_pacf_plot(data: dict | None, title: str | None = None) -> go.Figure | No
     if data is None:
         return None
     lags = np.asarray(data["lags"])
+    conf = float(data["conf"])
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.12, subplot_titles=["ACF", "PACF"])
-    for row, key, ci_key in [(1, "acf", "acf_ci"), (2, "pacf", "pacf_ci")]:
-        vals = np.asarray(data[key])
-        ci = np.asarray(data[ci_key])
-        band_low = ci[:, 0] - vals  # centre the band on zero, statsmodels returns it around each value
-        band_high = ci[:, 1] - vals
-        fig.add_scatter(
-            x=list(lags) + list(lags[::-1]),
-            y=list(band_high) + list(band_low[::-1]),
-            fill="toself",
-            fillcolor="rgba(0,0,0,0.08)",
-            line={"color": "rgba(255,255,255,0)"},
-            showlegend=False,
-            hoverinfo="skip",
-            row=row,
-            col=1,
-        )
+    for row, key in [(1, "acf"), (2, "pacf")]:
         fig.add_bar(
             x=lags,
-            y=vals,
+            y=np.asarray(data[key]),
             marker_color="#4c78a8",
             width=0.15,
             showlegend=False,
@@ -1326,6 +1351,8 @@ def acf_pacf_plot(data: dict | None, title: str | None = None) -> go.Figure | No
             row=row,
             col=1,
         )
+        for bound in (conf, -conf):
+            fig.add_hline(y=bound, line_dash="dash", line_color="#d62728", row=row, col=1)
     fig.update_xaxes(title_text="Lag", dtick=1, row=2, col=1)
     fig.update_layout(template=TEMPLATE, title=title or "ACF / PACF", height=460)
     return fig
@@ -1356,113 +1383,19 @@ def garch_volatility_plot(
             x=fitted.index, y=fitted.to_numpy(), mode="lines", name="In-sample volatility", line={"color": "#1f77b4"}
         )
     x = forecast_index if forecast_index is not None else forecast["horizon"]
+    y = np.asarray(forecast["volatility"])
+    if fitted is not None and len(fitted) > 0 and forecast_index is not None:
+        x = [fitted.index[-1], *list(forecast_index)]
+        y = np.concatenate([[float(fitted.iloc[-1])], y])
     fig.add_scatter(
         x=x,
-        y=forecast["volatility"],
+        y=y,
         mode="lines+markers",
         name="Forecast volatility",
         line={"color": "#d62728", "dash": "dash"},
     )
     fig.update_layout(template=TEMPLATE, title=title or "Conditional volatility (GARCH)", yaxis_title="Volatility")
     fig.update_traces(yhoverformat=".3f")
-    return fig
-
-def irf_grid(data: dict | None, title: str | None = None) -> go.Figure | None:
-    """
-    Grid of impulse response functions for a fitted VAR.
-
-    Row i, column j traces the response of series i to a one-time shock in series j
-    across the forecast horizon, with a zero reference line per panel.
-
-    Args:
-        data (dict | None): Output of `econometrics.var_irf` ('steps'/'names'/'irfs',
-            the last with shape (steps + 1, n, n)).
-        title (str | None): Figure title.
-
-    Returns:
-        go.Figure | None: The figure, or None if the input is missing.
-    """
-    if data is None:
-        return None
-    steps = np.asarray(data["steps"])
-    names = list(data["names"])
-    irfs = np.asarray(data["irfs"])
-    n = len(names)
-    fig = make_subplots(
-        rows=n,
-        cols=n,
-        shared_xaxes=True,
-        column_titles=[f"Shock: {name}" for name in names],
-        row_titles=[f"Response: {name}" for name in names],
-        vertical_spacing=0.09,
-        horizontal_spacing=0.07,
-    )
-    for i in range(n):
-        for j in range(n):
-            fig.add_scatter(
-                x=steps,
-                y=irfs[:, i, j],
-                mode="lines",
-                line={"color": "#4c78a8"},
-                showlegend=False,
-                hovertemplate=f"{names[j]} -> {names[i]}<br>Step %{{x}}<br>Response: %{{y:.3f}}<extra></extra>",
-                row=i + 1,
-                col=j + 1,
-            )
-            fig.add_hline(y=0, line_dash="dash", line_color="rgba(0,0,0,0.3)", row=i + 1, col=j + 1)
-    fig.update_layout(template=TEMPLATE, title=title or "Impulse responses", height=240 * n)
-    fig.update_annotations(font_size=11)
-    fig.update_xaxes(title_text="Steps ahead", row=n)
-    return fig
-
-
-def fevd_area(data: dict | None, title: str | None = None) -> go.Figure | None:
-    """
-    Forecast error variance decomposition as stacked areas, one panel per series.
-
-    Each panel shows, across the horizon, the share of that series' forecast error
-    variance attributable to a shock in each series (the shares sum to one).
-
-    Args:
-        data (dict | None): Output of `econometrics.var_fevd` ('steps'/'names'/
-            'decomp', the last with shape (n, steps, n)).
-        title (str | None): Figure title.
-
-    Returns:
-        go.Figure | None: The figure, or None if the input is missing.
-    """
-    if data is None:
-        return None
-    steps = np.asarray(data["steps"])
-    names = list(data["names"])
-    decomp = np.asarray(data["decomp"])
-    n = len(names)
-    palette = px.colors.qualitative.Plotly
-    fig = make_subplots(
-        rows=n,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.08,
-        subplot_titles=[f"{name} forecast error" for name in names],
-    )
-    for i in range(n):
-        for j in range(n):
-            fig.add_scatter(
-                x=steps,
-                y=decomp[i, :, j],
-                mode="lines",
-                stackgroup=f"row{i}",
-                name=names[j],
-                legendgroup=names[j],
-                showlegend=i == 0,
-                line={"color": palette[j % len(palette)]},
-                hovertemplate=f"Shock {names[j]}<br>Step %{{x}}<br>Share: %{{y:.2f}}<extra></extra>",
-                row=i + 1,
-                col=1,
-            )
-    fig.update_layout(template=TEMPLATE, title=title or "Variance decomposition", height=240 * n)
-    fig.update_yaxes(range=[0, 1], title_text="Share")
-    fig.update_xaxes(title_text="Steps ahead", row=n, col=1)
     return fig
 
 def shap_local_bar(contributions: pd.Series | None, top_n: int = 12, title: str | None = None) -> go.Figure | None:
