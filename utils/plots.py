@@ -903,88 +903,6 @@ def roc_curves(curves: dict, title: str | None = None) -> go.Figure | None:
     )
     return fig
 
-
-def pr_curves(curves: dict, title: str | None = None) -> go.Figure | None:
-    """
-    Per-class one-vs-rest precision-recall curves (average precision in the legend).
-
-    Args:
-        curves (dict): Output of `evaluate.pr_curve_data` (label -> recall/precision/ap).
-        title (str | None): Figure title.
-
-    Returns:
-        go.Figure | None: The figure, or None if no curve is available.
-    """
-    if not curves:
-        return None
-    palette = px.colors.qualitative.Plotly
-    fig = go.Figure()
-    for i, (label, d) in enumerate(curves.items()):
-        colour = palette[i % len(palette)]
-        fig.add_scatter(
-            x=d["recall"],
-            y=d["precision"],
-            mode="lines",
-            name=f"{label} (AP={d['ap']:.2f})",
-            line={"color": colour},
-            hovertemplate=f"Recall: %{{x:.2f}}<br>Precision: %{{y:.2f}}<extra>{label}</extra>",
-        )
-        base = d.get("baseline")
-        if base is not None:
-            fig.add_hline(
-                y=base,
-                line_dash="dot",
-                line_color=colour,
-                annotation_text=f"{label} chance ({base:.2f})",
-                annotation_font_size=10,
-            )
-    fig.update_layout(
-        template=TEMPLATE,
-        title=title or "Precision-recall curve",
-        xaxis_title="Recall",
-        yaxis_title="Precision",
-    )
-    return fig
-
-
-def lift_curves(curves: dict, title: str | None = None) -> go.Figure | None:
-    """
-    Per-class cumulative lift curves against a random-targeting baseline.
-
-    Args:
-        curves (dict): Output of `evaluate.lift_curve_data` (label -> fraction/lift).
-        title (str | None): Figure title.
-
-    Returns:
-        go.Figure | None: The figure, or None if no curve is available.
-    """
-    if not curves:
-        return None
-    fig = go.Figure()
-    for label, d in curves.items():
-        fig.add_scatter(
-            x=d["fraction"],
-            y=d["lift"],
-            mode="lines",
-            name=str(label),
-            hovertemplate=f"Top fraction: %{{x:.2f}}<br>Lift: %{{y:.2f}}x<extra>{label}</extra>",
-        )
-    fig.add_hline(
-        y=1,
-        line_dash="dash",
-        line_color="#e45756",
-        annotation_text="Random targeting (lift = 1)",
-        annotation_font_size=10,
-    )
-    fig.update_layout(
-        template=TEMPLATE,
-        title=title or "Lift curve",
-        xaxis_title="Population targeted (top fraction)",
-        yaxis_title="Lift vs. random",
-    )
-    return fig
-
-
 def confusion_heatmap(
     cm: pd.DataFrame | None, normalize: bool = False, title: str | None = None
 ) -> go.Figure | None:
@@ -1359,7 +1277,7 @@ def acf_pacf_plot(data: dict | None, title: str | None = None) -> go.Figure | No
 
 
 def garch_volatility_plot(
-    forecast: dict | None, forecast_index=None, title: str | None = None
+    forecast: dict | None, forecast_index=None, title: str | None = None, markers: bool = False,
 ) -> go.Figure | None:
     """
     In-sample conditional volatility with an optional forecast continuation.
@@ -1370,6 +1288,7 @@ def garch_volatility_plot(
         forecast_index: Dates for the forecast horizon; when given, the forecast
             volatility is drawn on the same date axis after the in-sample part.
         title (str | None): Figure title.
+        markers (bool): Also draw point markers on the forecast trace;
 
     Returns:
         go.Figure | None: The figure, or None if the input is missing.
@@ -1390,7 +1309,7 @@ def garch_volatility_plot(
     fig.add_scatter(
         x=x,
         y=y,
-        mode="lines+markers",
+        mode="lines+markers" if markers else "lines",
         name="Forecast volatility",
         line={"color": "#d62728", "dash": "dash"},
     )

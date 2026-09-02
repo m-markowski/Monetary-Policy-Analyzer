@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import optuna
-from catboost import CatBoostClassifier, CatBoostRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor
 from scipy.stats import loguniform, randint, uniform
 from sklearn.base import clone
@@ -13,9 +12,8 @@ from sklearn.ensemble import (
 )
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, LogisticRegression, Ridge
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit, cross_val_score
-from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder, PowerTransformer, StandardScaler
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_selection import SelectKBest, f_classif, f_regression
 from sklearn.svm import SVC, SVR
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
@@ -25,7 +23,7 @@ from src.models.evaluate import CV_SCORING
 from config.settings import SEED
 
 # Higher-is-better metrics; only these support the "stop when good enough" hook.
-MAXIMISE_METRICS = ("R2", "ROC-AUC (macro/OvR)", "F1-macro", "Balanced accuracy")
+MAXIMISE_METRICS = ("ROC-AUC (macro/OvR)", "F1-macro", "Balanced accuracy")
 # Regression selects on RMSE, not R2: near-constant target windows (ZIRP-era CV folds,
 # the COVID dev window) make fold R2 explode while RMSE stays comparable across models.
 DEFAULT_SCORING = {"regression": "RMSE", "classification": "ROC-AUC (macro/OvR)"}
@@ -95,7 +93,7 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
     Build the per-task model roster with curated tunable hyperparameters.
 
     Only a handful of impactful parameters is tuned per model. `needs_scaling`
-    marks the scale-sensitive models (linear, KNN, SVM).
+    marks the scale-sensitive models (linear and SVM).
     Class weights are applied where the estimator supports them natively; the
     remaining imbalance is handled downstream by threshold tuning.
 
@@ -118,22 +116,14 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
             },
             "Lasso": {
                 "estimator": Lasso(random_state=random_state, max_iter=50000),
-                "space": {"model__alpha": ("float", 1e-2, 1e2, True)},
+                "space": {"model__alpha": ("float", 1e-4, 1e2, True)},
                 "needs_scaling": True,
             },
             "ElasticNet": {
                 "estimator": ElasticNet(random_state=random_state, max_iter=50000),
                 "space": {
-                    "model__alpha": ("float", 1e-2, 1e2, True),
+                    "model__alpha": ("float", 1e-4, 1e2, True),
                     "model__l1_ratio": ("float", 0.05, 0.95),
-                },
-                "needs_scaling": True,
-            },
-            "KNN": {
-                "estimator": KNeighborsRegressor(),
-                "space": {
-                    "model__n_neighbors": ("int", 3, 30),
-                    "model__weights": ("cat", ["uniform", "distance"]),
                 },
                 "needs_scaling": True,
             },
@@ -194,17 +184,6 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
                 },
                 "needs_scaling": False,
             },
-            "CatBoost": {
-                "estimator": CatBoostRegressor(
-                    random_state=random_state, verbose=0, allow_writing_files=False
-                ),
-                "space": {
-                    "model__iterations": ("int", 100, 600),
-                    "model__depth": ("int", 2, 8),
-                    "model__learning_rate": ("float", 1e-2, 3e-1, True),
-                },
-                "needs_scaling": False,
-            },
         }
 
     return {
@@ -215,14 +194,6 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
             "space": {
                 "model__C": ("float", 1e-3, 1e2, True),
                 "model__penalty": ("cat", ["l1", "l2"]),
-            },
-            "needs_scaling": True,
-        },
-        "KNN": {
-            "estimator": KNeighborsClassifier(),
-            "space": {
-                "model__n_neighbors": ("int", 3, 30),
-                "model__weights": ("cat", ["uniform", "distance"]),
             },
             "needs_scaling": True,
         },
@@ -286,28 +257,13 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
                 "model__min_child_samples": ("int", 5, 30),
             },
             "needs_scaling": False,
-        },
-        "CatBoost": {
-            "estimator": CatBoostClassifier(
-                random_state=random_state,
-                verbose=0,
-                allow_writing_files=False,
-                auto_class_weights="Balanced" if class_weight else None,
-            ),
-            "space": {
-                "model__iterations": ("int", 100, 600),
-                "model__depth": ("int", 2, 8),
-                "model__learning_rate": ("float", 1e-2, 3e-1, True),
-            },
-            "needs_scaling": False,
-        },
+        }
     }
 
 
 def build_pipeline(
     estimator,
     needs_scaling: bool,
-    power_transform: bool = False,
     task: str | None = None,
     k_features: int | None = None,
 ) -> Pipeline:
@@ -316,14 +272,11 @@ def build_pipeline(
 
     A univariate SelectKBest filter is prepended when `k_features` is given, so the
     selection is re-fit inside every CV fold (leakage-safe) and curbs the p >> n
-    overfit on the monthly frame. Yeo-Johnson is used (not Box-Cox) because rates and
-    spreads go zero/negative; when enabled it standardises internally, so the separate
-    scaler is dropped.
+    overfit on the monthly frame.
 
     Args:
         estimator: The final sklearn-compatible estimator.
         needs_scaling (bool): Prepend a StandardScaler for scale-sensitive models.
-        power_transform (bool): Apply a Yeo-Johnson PowerTransformer instead.
         task (str | None): 'classification' or 'regression'; picks the SelectKBest
             score function. Selection is skipped when None.
         k_features (int | None): Number of features to keep; no selection when None.
@@ -335,14 +288,31 @@ def build_pipeline(
     if k_features is not None and task is not None:
         score_func = f_classif if task == "classification" else f_regression
         steps.append(("select", SelectKBest(score_func=score_func, k=k_features)))
-    if power_transform:
-        steps.append(("power", PowerTransformer(method="yeo-johnson", standardize=True)))
-    elif needs_scaling:
+    if needs_scaling:
         steps.append(("scaler", StandardScaler()))
     steps.append(("model", estimator))
     pipe = Pipeline(steps)
     pipe.set_output(transform="pandas")
     return pipe
+
+def auto_k_features(n_rows: int, n_features: int, n_splits: int = 5) -> int:
+    """
+    Size the SelectKBest k to the smallest expanding CV fold.
+
+    The earliest TimeSeriesSplit fold trains on ~n_rows/(n_splits+1) rows; keeping
+    about 4 training rows per feature keeps even that fold well-conditioned and the
+    CV score stable.
+
+    Args:
+        n_rows (int): Number of training rows.
+        n_features (int): Number of candidate features.
+        n_splits (int): Number of TimeSeriesSplit folds.
+
+    Returns:
+        int: Number of features to keep (at least 5, at most n_features).
+    """
+    smallest_fold = n_rows // (n_splits + 1)
+    return max(5, min(n_features, smallest_fold // 4))
 
 
 def chronological_split(X: pd.DataFrame, y: pd.Series, preset: str = "70/15/15") -> dict:
@@ -431,7 +401,6 @@ def train_roster(
     scoring=None,
     models=None,
     class_weight=True,
-    power_transform=False,
     k_features="auto",
     early_stop=None,
     random_state=SEED,
@@ -453,8 +422,8 @@ def train_roster(
         scoring (str | None): Display metric driving selection; defaults per task.
         models (list | None): Subset of roster names to train (all if None).
         class_weight (bool): Pass 'balanced' weighting where supported (clf).
-        power_transform (bool): Apply Yeo-Johnson inside each pipeline.
-        k_features (int | str): 'auto' keeps ~n/10 features via in-CV SelectKBest, or an explicit count.
+        k_features (int | str): 'auto' sizes the in-CV SelectKBest to the smallest CV
+            fold (see `auto_k_features`), or an explicit count.
         early_stop (float | None): Stop once a model's CV score reaches this value
             (only for higher-is-better metrics).
         random_state (int): Seed.
@@ -470,11 +439,7 @@ def train_roster(
     cv = TimeSeriesSplit(n_splits=n_splits)
 
     if k_features == "auto":
-        # SelectKBest is re-fit inside each CV fold; the earliest expanding fold trains
-        # on ~n/(n_splits+1) rows, so size k to that fold (~4 rows per feature) to keep
-        # even the smallest fold well-conditioned and the CV score stable.
-        smallest_fold = len(X) // (n_splits + 1)
-        k_features = max(5, min(X.shape[1], smallest_fold // 4))
+        k_features = auto_k_features(len(X), X.shape[1], n_splits)
 
     classes, encoder = None, None
     if task == "classification":
@@ -490,9 +455,7 @@ def train_roster(
     total = len(roster)
     can_early_stop = early_stop is not None and scoring in MAXIMISE_METRICS
     for done, (name, cfg) in enumerate(roster.items(), start=1):
-        pipe = build_pipeline(
-            cfg["estimator"], cfg["needs_scaling"], power_transform, task=task, k_features=k_features
-        )
+        pipe = build_pipeline(cfg["estimator"], cfg["needs_scaling"], task=task, k_features=k_features)
         model, best_params, cv_score = search_estimator(
             pipe, cfg["space"], X, y, scorer, cv, budget, random_state
         )

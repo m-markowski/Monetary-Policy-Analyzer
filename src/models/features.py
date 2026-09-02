@@ -76,7 +76,7 @@ def build_matrix(
         exclude.update(extra_exclude)
     features = monthly.drop(columns=[c for c in exclude if c in monthly.columns]).select_dtypes("number")
     # pct_change can produce ±inf (e.g. divide-by-zero); dropna alone keeps them and
-    # StandardScaler / PowerTransformer then fail
+    # StandardScaler then fails
     features = features.replace([np.inf, -np.inf], np.nan)
 
     if target_lags and target_column in monthly.columns:

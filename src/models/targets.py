@@ -2,23 +2,49 @@ import pandas as pd
 
 # Curated modelling targets per economy. Each maps a display name to its source
 # column, a `positive` flag (strictly-positive series may take a log/Yeo-Johnson
-# target transform later; the policy rate and spreads never do) and `extra_exclude`
+# target transform later; the policy rate and spreads never do), `extra_exclude`
 # (features that reconstruct the target from other columns, e.g. curve spreads that
-# embed the policy rate, which `leakage_columns` stem-matching cannot catch).
+# embed the policy rate, which `leakage_columns` stem-matching cannot catch) and
+# `purpose` (the one-line business question the target answers, shown in Setup).
+
 CURATED_TARGETS = {
     "usa": {
         "Policy rate": {
             "column": "rate_ff_eff",
             "positive": False,
             "extra_exclude": ["sprd_5y_ff", "sprd_2y_ff"],
+            "purpose": "Where is the Fed heading - the forward rate call as a number",
         },
-        "Sticky core inflation": {"column": "cpi_sticky_core", "positive": True, "extra_exclude": []},
-        "Unemployment rate": {"column": "rate_unemployment", "positive": True, "extra_exclude": []},
-        "Real GDP": {"column": "gdp_real", "positive": True, "extra_exclude": []},
+        "Sticky core inflation": {
+            "column": "cpi_sticky_core",
+            "positive": True,
+            "extra_exclude": [],
+            "purpose": "Will underlying price pressure build or fade - the slow-moving inflation the Fed reacts to.",
+        },
+        "Unemployment rate": {
+            "column": "rate_unemployment",
+            "positive": True,
+            "extra_exclude": [],
+            "purpose": "Is the labour market loosening - the other half of the Fed's dual mandate.",
+        },
+        "Nonfarm payrolls": {
+            "column": "emp_nonfarm",
+            "positive": True,
+            "extra_exclude": [],
+            "purpose": "Is job creation accelerating or stalling - the monthly employment print markets trade on.",
+        },
+        "Real GDP": {
+            "column": "gdp_real",
+            "positive": True,
+            "extra_exclude": [],
+            "purpose": "Is growth holding up - the broadest, quarterly activity gauge.",
+        },
         "Yield curve (10y-2y)": {
             "column": "sprd_10y_2y",
             "positive": False,
             "extra_exclude": ["yld_ust_2y", "yld_ust_10y", "sprd_yld_5y2y", "sprd_yld_10y5y"],
+            "purpose": "Will the curve steepen or invert - a market-priced growth/recession "
+            "signal; this asks about long-end expectations, not the policy rate itself.",
         },
     },
     "eurozone": {
@@ -26,13 +52,26 @@ CURATED_TARGETS = {
             "column": "rate_ecb_dep",
             "positive": False,
             "extra_exclude": ["sprd_10y_ecb", "psprd_ib_3m_ecb"],
+            "purpose": "Where is the ECB heading - the forward rate call as a number",
         },
-        "HICP inflation": {"column": "hicp_all", "positive": True, "extra_exclude": []},
-        "Real GDP": {"column": "gdp_real", "positive": True, "extra_exclude": []},
+        "HICP inflation": {
+            "column": "hicp_all",
+            "positive": True,
+            "extra_exclude": [],
+            "purpose": "Will euro-area inflation build or fade - HICP is the variable the ECB's mandate is written in.",
+        },
+        "Real GDP": {
+            "column": "gdp_real",
+            "positive": True,
+            "extra_exclude": [],
+            "purpose": "Is the euro-area economy expanding or contracting - the broadest, quarterly activity gauge.",
+        },
         "Yield curve (10y-ECB)": {
             "column": "sprd_10y_ecb",
             "positive": False,
             "extra_exclude": ["yld_10y_gov", "rate_ecb_dep", "sprd_10y_ib3m", "psprd_ib_3m_ecb"],
+            "purpose": "Will the yield curve steepen or flatten relative to the ECB policy rate - a market "
+            "signal of changing growth, inflation, and term-premium expectations.",
         },
     },
 }

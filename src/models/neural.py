@@ -32,7 +32,7 @@ def build_network(kind, input_shape, n_outputs, task, units, dropout, l2, learni
     Compile a small regularized Keras network for one task.
 
     Args:
-        kind (str): 'mlp', 'lstm' or 'conv1d'.
+        kind (str): 'mlp' or 'lstm'.
         input_shape (tuple): (n_features,) for MLP, (lookback, n_features) otherwise.
         n_outputs (int): Number of classes (classification) or 1 (regression).
         task (str): 'regression' or 'classification'.
@@ -54,10 +54,6 @@ def build_network(kind, input_shape, n_outputs, task, units, dropout, l2, learni
     elif kind == "lstm":
         model.add(keras.layers.LSTM(units, kernel_regularizer=reg))
         model.add(keras.layers.Dropout(dropout))
-    elif kind == "conv1d":
-        model.add(keras.layers.Conv1D(units, kernel_size=3, padding="causal", activation="relu", kernel_regularizer=reg))
-        model.add(keras.layers.GlobalAveragePooling1D())
-        model.add(keras.layers.Dropout(dropout))
 
     if task == "classification":
         model.add(keras.layers.Dense(n_outputs, activation="softmax"))
@@ -71,7 +67,7 @@ def build_network(kind, input_shape, n_outputs, task, units, dropout, l2, learni
 
 class KerasEstimator:
     """
-    sklearn-style wrapper around a small Keras network (MLP / LSTM / Conv1D).
+    sklearn-style wrapper around a small Keras network (MLP / LSTM).
 
     Standardisation and (for the sequence kinds) windowing are handled internally,
     so the estimator consumes the same 2D feature frame as the sklearn roster and
@@ -111,7 +107,7 @@ class KerasEstimator:
 
     def transform_inputs(self, X) -> np.ndarray:
         scaled = self.scaler_.transform(np.asarray(X, dtype=float))
-        if self.kind in ("lstm", "conv1d"):
+        if self.kind == "lstm":
             return make_sequences(scaled, self.lookback)
         return scaled
 
@@ -184,7 +180,7 @@ class KerasEstimator:
                 self.model_ = keras.models.load_model(path)
 
 
-def neural_models(task, lookback=6, class_weight=True, random_state=SEED, include_conv=False) -> dict:
+def neural_models(task, lookback=6, class_weight=True, random_state=SEED) -> dict:
     """
     Build the (unfitted) neural roster for one task.
 
@@ -193,7 +189,6 @@ def neural_models(task, lookback=6, class_weight=True, random_state=SEED, includ
         lookback (int): Window length for the sequence models.
         class_weight (bool): Balance classes during training (classification).
         random_state (int): Seed.
-        include_conv (bool): Add the optional Conv1D model.
 
     Returns:
         dict: Model name -> unfitted KerasEstimator.
@@ -203,12 +198,10 @@ def neural_models(task, lookback=6, class_weight=True, random_state=SEED, includ
         "MLP": KerasEstimator(task, kind="mlp", **common),
         "LSTM": KerasEstimator(task, kind="lstm", lookback=lookback, **common),
     }
-    if include_conv:
-        roster["Conv1D"] = KerasEstimator(task, kind="conv1d", lookback=lookback, **common)
     return roster
 
 
-def fit_neural_models(X, y, task, *, models=None, lookback=6, class_weight=True, random_state=SEED, include_conv=False, progress=None) -> dict:
+def fit_neural_models(X, y, task, *, models=None, lookback=6, class_weight=True, random_state=SEED, progress=None) -> dict:
     """
     Fit the neural roster on the training split.
 
@@ -224,13 +217,12 @@ def fit_neural_models(X, y, task, *, models=None, lookback=6, class_weight=True,
         lookback (int): Window length for the sequence models.
         class_weight (bool): Balance classes during training (classification).
         random_state (int): Seed.
-        include_conv (bool): Include the optional Conv1D model.
         progress (callable | None): Called as progress(done, total, name, None).
 
     Returns:
         dict: Model name -> fitted KerasEstimator.
     """
-    roster = neural_models(task, lookback=lookback, class_weight=class_weight, random_state=random_state, include_conv=include_conv)
+    roster = neural_models(task, lookback=lookback, class_weight=class_weight, random_state=random_state)
     if models:
         roster = {name: est for name, est in roster.items() if name in models}
 

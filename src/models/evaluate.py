@@ -2,15 +2,12 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
-    average_precision_score,
     balanced_accuracy_score,
     confusion_matrix,
     f1_score,
     log_loss,
     mean_absolute_error,
-    precision_recall_curve,
     precision_recall_fscore_support,
-    r2_score,
     roc_auc_score,
     roc_curve,
     root_mean_squared_error,
@@ -48,7 +45,7 @@ def roc_auc_ovr_scorer(estimator, X, y) -> float:
         aucs.append(roc_auc_score(binary, proba[:, col]))
     return float(np.mean(aucs)) if aucs else 0.5
 
-REGRESSION_METRICS = ("RMSE", "MAE", "R2")
+REGRESSION_METRICS = ("RMSE", "MAE")
 CLASSIFICATION_METRICS = ("ROC-AUC (macro/OvR)", "F1-macro", "Balanced accuracy")
 
 # Maps a display metric to the sklearn scoring string used for CV / model selection.
@@ -56,7 +53,6 @@ CLASSIFICATION_METRICS = ("ROC-AUC (macro/OvR)", "F1-macro", "Balanced accuracy"
 CV_SCORING = {
     "RMSE": "neg_root_mean_squared_error",
     "MAE": "neg_mean_absolute_error",
-    "R2": "r2",
     "ROC-AUC (macro/OvR)": roc_auc_ovr_scorer,
     "F1-macro": "f1_macro",
     "Balanced accuracy": "balanced_accuracy",
@@ -72,14 +68,13 @@ def regression_metrics(y_true, y_pred) -> dict:
         y_pred: Predicted target values.
 
     Returns:
-        dict: RMSE, MAE and R2 keyed by their display names.
+        dict: RMSE and MAE keyed by their display names.
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     return {
         "RMSE": float(root_mean_squared_error(y_true, y_pred)),
-        "MAE": float(mean_absolute_error(y_true, y_pred)),
-        "R2": float(r2_score(y_true, y_pred)),
+        "MAE": float(mean_absolute_error(y_true, y_pred))
     }
 
 
@@ -114,7 +109,12 @@ def classification_metrics(y_true, y_pred, labels) -> dict:
 
 def roc_auc_macro_ovr(y_true, y_proba, labels) -> float | None:
     """
-    Macro one-vs-rest ROC-AUC, handling the binary and multiclass cases.
+    Macro one-vs-rest ROC-AUC, averaged over the classes present in y_true.
+
+    Mirrors `roc_auc_ovr_scorer`: each class with both positives and negatives in
+    `y_true` contributes its OvR AUC and absent or degenerate classes are skipped,
+    so a split missing a class (a small or quiet dev window) still gets a score
+    instead of nulling the whole leaderboard column and the winner selection.
 
     Args:
         y_true: Observed class labels.
@@ -122,17 +122,18 @@ def roc_auc_macro_ovr(y_true, y_proba, labels) -> float | None:
         labels (list): Ordered label set matching the probability columns.
 
     Returns:
-        float | None: Macro OvR ROC-AUC, or None if it is undefined (e.g. a class
-        is absent from y_true).
+        float | None: Mean OvR AUC over the scoreable classes, or None if no class
+        has both positives and negatives in y_true.
     """
+    y_true = np.asarray(y_true)
     y_proba = np.asarray(y_proba, dtype=float)
-    try:
-        if len(labels) == 2:
-            binary = (np.asarray(y_true) == labels[1]).astype(int)
-            return float(roc_auc_score(binary, y_proba[:, 1]))
-        return float(roc_auc_score(y_true, y_proba, labels=labels, multi_class="ovr", average="macro"))
-    except ValueError:
-        return None
+    aucs = []
+    for j, lab in enumerate(labels):
+        binary = (y_true == lab).astype(int)
+        if binary.sum() in (0, len(binary)):
+            continue
+        aucs.append(roc_auc_score(binary, y_proba[:, j]))
+    return float(np.mean(aucs)) if aucs else None
 
 
 def probability_metrics(y_true, y_proba, labels) -> dict:
@@ -239,67 +240,6 @@ def roc_curve_data(y_true, y_proba, labels) -> dict:
             "auc": float(roc_auc_score(binary, y_proba[:, j])),
         }
     return out
-
-
-def pr_curve_data(y_true, y_proba, labels) -> dict:
-    """
-    Per-class OvR precision-recall coordinates and average precision.
-
-    Args:
-        y_true: Observed class labels.
-        y_proba: Predicted class probabilities (n_samples x n_classes).
-        labels (list): Ordered label set matching the probability columns.
-
-    Returns:
-        dict: Label -> Label -> {'recall', 'precision', 'ap', 'baseline'}.
-    """
-    y_true = np.asarray(y_true)
-    y_proba = np.asarray(y_proba, dtype=float)
-    out = {}
-    for j, lab in enumerate(labels):
-        binary = (y_true == lab).astype(int)
-        if binary.sum() in (0, len(binary)):
-            continue
-        precision, recall, _ = precision_recall_curve(binary, y_proba[:, j])
-        out[lab] = {
-            "recall": recall,
-            "precision": precision,
-            "ap": float(average_precision_score(binary, y_proba[:, j])),
-            "baseline": float(binary.mean()),
-        }
-    return out
-
-
-def lift_curve_data(y_true, y_proba, labels) -> dict:
-    """
-    Per-class OvR cumulative lift coordinates for plotting.
-
-    Lift at a population fraction is the positive rate among the top-scored
-    samples divided by the overall positive rate.
-
-    Args:
-        y_true: Observed class labels.
-        y_proba: Predicted class probabilities (n_samples x n_classes).
-        labels (list): Ordered label set matching the probability columns.
-
-    Returns:
-        dict: Label -> {'fraction', 'lift'}.
-    """
-    y_true = np.asarray(y_true)
-    y_proba = np.asarray(y_proba, dtype=float)
-    n = len(y_true)
-    ranks = np.arange(1, n + 1)
-    out = {}
-    for j, lab in enumerate(labels):
-        binary = (y_true == lab).astype(int)
-        base = binary.mean()
-        if base == 0:
-            continue
-        order = np.argsort(y_proba[:, j])[::-1]
-        cum_pos = np.cumsum(binary[order])
-        out[lab] = {"fraction": ranks / n, "lift": (cum_pos / ranks) / base}
-    return out
-
 
 def build_leaderboard(models, splits, task, labels=None, thresholds=None) -> pd.DataFrame:
     """

@@ -184,23 +184,17 @@ COINTEGRATION_HELP = (
 )
 
 MONTHLY_RATIONALE = (
-    "Modelling runs on a monthly view of the daily data (the month-end snapshot). The targets are "
-    "monthly/meeting-cadence, so the daily rows are mostly forward-filled repeats of the same monthly "
-    "value - keeping them would inflate the sample, leak across the train/test split and make "
-    "cross-validation meaningless. Monthly sampling removes that repetition but leaves the trend and "
-    "autocorrelation intact; that is handled by the targets themselves, which are forward changes "
-    "(regression) or direction labels (classification) rather than trending levels. No further "
-    "transform is applied to the features beyond per-model standardisation."
+    "Modelling runs on a monthly view of the daily data (the month-end snapshot). The daily rows are mostly "
+    "forward-filled repeats of the same monthly value - keeping them would inflate the sample, leak across "
+    "the train/test split and make cross-validation meaningless. Monthly sampling removes that repetition but "
+    "leaves the trend and autocorrelation intact; that is handled by the targets themselves, which are forward changes "
+    "(regression) or direction labels (classification) rather than trending levels."
 )
 
 SPLIT_HELP = (
     "The data is split in time order (no shuffling) into train, dev and test. Train fits the models; "
     "dev picks the class thresholds and blend weights, and steers early stopping for the neural nets "
-    "(the only models that early-stop) - kept separate so none of those choices peeks at the test "
-    "set; test is the untouched final score. Presets keep dev and test roughly equal in size. One "
-    "caveat: the current dev window covers the COVID shock, so dev scores can look structurally "
-    "worse than test. That is an era effect of splitting by time, not a fault of the split - "
-    "chronological splits cannot dodge which years land where."
+    "- kept separate so none of those choices peeks at the test set. Presets keep dev and test roughly equal in size."
 )
 
 CV_HELP = (
@@ -216,10 +210,10 @@ BUDGET_HELP = (
 
 METRIC_HELP = (
     "The scoring metric drives both model selection and the reported leaderboard. Regression: RMSE "
-    "and MAE are average error sizes (lower is better), R2 is the share of variance explained (higher "
-    "is better). Classification: ROC-AUC (macro, one-vs-rest) measures class separation, F1-macro "
-    "balances precision and recall equally across classes, balanced accuracy averages per-class "
-    "recall - all robust to the Hold-heavy imbalance."
+    "and MAE are average error sizes in the target's own units (lower is better); RMSE punishes "
+    "large misses harder, MAE treats every miss alike. Classification: ROC-AUC (macro, one-vs-rest) "
+    "measures class separation, F1-macro balances precision and recall equally across classes, "
+    "balanced accuracy averages per-class recall - all robust to the Hold-heavy imbalance."
 )
 
 LEAKAGE_HELP = (
@@ -231,30 +225,28 @@ LEAKAGE_HELP = (
 )
 
 THRESHOLD_HELP = (
-    "Rather than always taking the highest-probability class, the decision threshold for each class is "
-    "set by Youden's J (the point maximising true-positive minus false-positive rate) on the dev "
-    "split, then applied unchanged to the test set. Tuning it on dev keeps the test score honest, "
-    "and it helps the rare Hike/Cut classes get picked up under the Hold-heavy mix. One caveat: the dev "
-    "window spans the 2020 COVID shock, so the tuned thresholds partly reflect that era's unusual "
-    "probabilities rather than a stable operating point."
+    "The operating point turns class probabilities into a single Hike/Hold/Cut call. The default "
+    "is plain argmax - take the highest-probability class. The toggle switches to per-class Youden's J "
+    "thresholds (the point maximising true-positive minus false-positive rate), tuned on the dev split. "
+    "Youden favours the rare Hike/Cut classes: it catches more of them at the price of more false "
+    "alarms, so try it when missing a move costs more than a wrong call."
 )
 
 DIAG_SPLIT_HELP = (
     "Choose which chronological split the diagnostics below are measured on. Test is the honest "
     "out-of-sample read and the default. Train shows the fit on the very months the model was "
     "fitted to - compare it with Test: a much better Train read means the model memorised its "
-    "training window (overfitting). Dev is the tuning split (class thresholds, ensemble weights, "
-    "the winner pick); inspect it to see the data those choices were based on, and note it spans "
-    "the 2020 COVID shock, so every model reads structurally worse there. 'Train + Dev + Test' "
-    "shows the whole sample as one path."
+    "training window (overfitting). Dev is the tuning split (ensemble weights, the winner pick and, when "
+    "the toggle is on, the Youden class thresholds); inspect it to see the data those choices were based on, "
+    "and note it spans the 2020 COVID shock, so every model reads structurally worse there. "
+    "'Train + Dev + Test' shows the whole sample as one path."
 )
 
 LEADERBOARD_HELP = (
     "Every model is scored on train, dev and test. Read the test column for real-world performance; "
     "a model that is excellent on train but weak on test is overfitting. The winner badge marks the "
-    "base model with the best Dev value of the chosen scoring metric - a pick made without touching "
-    "the test set. Blend and Stack are excluded from the pick: they are fit on the dev split, so "
-    "their dev scores are partly in-sample."
+    "base model with the best Dev value of the chosen scoring metric. Blend and Stack are excluded from "
+    "the pick: they are fit on the dev split, so their dev scores are partly in-sample."
 )
 
 HORIZON_HELP = (
@@ -276,10 +268,9 @@ TARGET_HELP = (
 )
 
 NEURAL_HELP = (
-    "The Keras nets (an MLP baseline and an LSTM, optionally a Conv1D) are heavy to fit and prone to "
-    "overfit on this dataset, and they rarely beat the gradient-boosted trees here, so they are "
-    "opt-in. Turn them on to showcase the deep-learning roster; expect the run to take noticeably "
-    "longer."
+    "The Keras nets (an MLP baseline and an LSTM) are heavy to fit and prone to overfit on this "
+    "dataset, and they rarely beat the gradient-boosted trees here, so they are opt-in. Turn them "
+    "on to showcase the deep-learning roster; expect the run to take noticeably longer."
 )
 
 CV_BUDGET_HELP = (
@@ -297,16 +288,15 @@ CV_ROC_AUC_NOTE = (
 )
 
 ENSEMBLE_HELP = (
-    "Both ensembles are built on the dev split, so the test set stays untouched. Blend is a "
+    "Both ensembles are built on the dev split. Blend is a "
     "weighted average of the base models' outputs: each weight is proportional to the inverse of "
     "that model's dev error (RMSE for regression, log loss for classification), normalised to sum "
     "to one, so models that erred less on dev count for more. Stack goes further: each base model "
     "produces its dev-split outputs (class probabilities for classification, point predictions for "
     "regression), those outputs become the input columns of a small linear meta-model (logistic "
-    "regression / ridge), and the meta-model learns how much to trust each base model, including "
-    "correcting their systematic mistakes. At prediction time the base models score the new month "
-    "first and the meta-model combines their outputs. Every sklearn base model enters both "
-    "ensembles; the neural nets are excluded."
+    "regression / ridge), and the meta-model learns how much to trust each base model. At prediction time "
+    "the base models score the new month first and the meta-model combines their outputs. Every sklearn base "
+    "model enters both ensembles; the neural nets are excluded."
 )
 
 ROC_AUC_OVR_NOTE = (
@@ -317,25 +307,23 @@ ROC_AUC_OVR_NOTE = (
 )
 
 COVID_DEV_NOTE = (
-    "Dev scores run structurally worse than train or test for every model because the dev window "
-    "spans the 2020 COVID shock - an era effect of splitting by time, not a model fault. The "
-    "dev-based ranking stays usable since the shock inflates every model's dev error similarly."
+    "Dev scores may be structurally worse when the 2020 COVID shock falls within the dev window - or "
+    "any other split - as the dataset grows and time-based split boundaries shift. This is an era effect, "
+    "not a model fault; dev-based ranking remains usable if the shock affects models similarly."
 )
 
 BASELINE_HELP_REG = (
     "The 'Baseline: no change' row is a zero-change random walk: it predicts the series does not "
-    "move over the horizon, the classic macro-forecasting yardstick. The Skill columns rescale "
-    "each model against it (1 - MSE_model / MSE_naive: 0 = no better than assuming no change, 1 = "
-    "perfect). Read RMSE/MAE - a typical miss in the target's own units - and Skill first; R2 is "
-    "secondary because it explodes on near-constant windows."
+    "move over the horizon, the classic macro-forecasting yardstick. Read RMSE/MAE - a typical "
+    "miss in the target's own units - together with the Skill columns, which rescale each model "
+    "against that baseline (1 - MSE_model / MSE_naive: 0 = no better than assuming no change, "
+    "1 = perfect, negative = worse than doing nothing)."
 )
 
 BASELINE_HELP_CLF = (
     "Two naive baselines anchor the board. 'Majority class' always predicts the most common "
     "training label; 'trailing momentum' extrapolates the sign of the rate move over the previous "
-    "h months - the strongest baseline that uses only information available at prediction time. A "
-    "persistence baseline (repeat the previous label) is deliberately absent: the forward label at "
-    "t-1 already embeds the future rate path, so it would not be feasible at prediction time. The "
+    "h months - the strongest baseline that uses only information available at prediction time. The "
     "hard-label baselines output no probabilities, so their ROC-AUC is blank."
 )
 
@@ -343,23 +331,6 @@ ROC_HELP = (
     "The ROC curve plots the true-positive rate against the false-positive rate as the threshold "
     "varies, one line per class (one-vs-rest). A curve hugging the top-left is good; the dashed red "
     "diagonal is random guessing (0.5 = chance, AUC 1 = perfect)."
-)
-
-PR_HELP = (
-    "The precision-recall curve trades off precision (how many predicted positives are correct) "
-    "against recall (how many actual positives are caught), one line per class. A good curve stays "
-    "high and flat toward the top-right; the dotted line is that class's chance level (its base "
-    "rate). It is more informative than ROC when a class is rare, as here. Average precision (AP) is "
-    "the area under it. Jagged or collapsing shapes usually mean very few positives on this split, so "
-    "read that class with caution."
-)
-
-LIFT_HELP = (
-    "Rank the months from most to least confident for a class, then walk down that ranking. Lift is "
-    "how many times more of that class you capture than picking months at random: a lift of 2 across "
-    "the top 10% means that slice holds twice the class's base rate. Curves start high and decay "
-    "toward the dashed line at 1 (random targeting); the longer a curve stays above 1, the more "
-    "useful the model's confidence ranking is."
 )
 
 CONFUSION_HELP = (
@@ -385,7 +356,9 @@ GROUP_IMPORTANCE_HELP = (
     "series such as inflation, unemployment, participation, savings and GDP growth; Market - "
     "equities, FX, commodities and volatility indices (eq_/fx_/cmd_/idx_); Target lags - the "
     "target's own past values added back as autoregressive features. A large Target-lags share "
-    "means the model leans on the series' own momentum more than on outside drivers."
+    "means the model leans on the series' own momentum more than on outside drivers. "
+    "The chart aggregates the same scores as the charts above - native importance when the model "
+    "exposes one, otherwise permutation importance."
 )
 
 SHAP_HELP = (
@@ -432,9 +405,7 @@ ECON_BASELINE_HELP_REG = (
 ECON_BASELINE_HELP_CLF = (
     "A statsmodels multinomial logit is shown alongside the machine-learning models as an "
     "interpretable baseline. It is judged on classical criteria as well as fit: the overall "
-    "likelihood-ratio test, McFadden's pseudo-R2 and per-class coefficient significance. The "
-    "residual diagnostics shown for the OLS baseline (Durbin-Watson, normality, Cook's distance) "
-    "do not carry over - they are defined for OLS residuals, not for a classifier. The ML/DL "
+    "likelihood-ratio test, McFadden's pseudo-R2 and per-class coefficient significance. The ML/DL "
     "models are judged on prediction only."
 )
 
@@ -811,10 +782,15 @@ def overfit_note(train_score: float | None, test_score: float | None, metric: st
     gap = train_score - test_score if higher_better else test_score - train_score
     rel = gap / (abs(train_score) if train_score else 1.0)
     head = f"Train {metric} {train_score:.3f} vs test {test_score:.3f}: "
+    if rel < -0.1:
+        return head + (
+            "test scores noticeably better than train - on a chronological split this usually "
+            "means the test window was an easier era, not extra generalisation power."
+        )
     if rel > 0.25:
         return head + (
             "a large gap - the model fits the training window far better than unseen data, a sign of "
-            "overfitting on this small monthly sample."
+            "overfitting on this sample."
         )
     if rel > 0.1:
         return head + "a moderate gap; some overfitting, read the test column as the honest score."
@@ -881,18 +857,6 @@ def metric_verdict(metric: str, value: float | None, benchmark: float | None = N
             f"Balanced accuracy {value:.2f}: {band}. It averages the per-class hit rates, so chance "
             "is about 0.33 for the three classes, not 0.5."
         )
-    if metric == "R2":
-        if value < 0:
-            reading = "worse than predicting the mean"
-        elif value < 0.3:
-            reading = "weak - little of the variation is explained"
-        elif value < 0.6:
-            reading = "moderate"
-        elif value < 0.8:
-            reading = "strong"
-        else:
-            reading = "very strong"
-        return f"R2 {value:.2f}: {reading} (share of the target's variation explained)."
     if metric in ("RMSE", "MAE"):
         u = f" {unit}" if unit else ""
         head = (
@@ -973,28 +937,6 @@ def confusion_verdict(cm) -> str:
             f"{actual} ({worst:.0f} months)."
         )
     return note
-
-def regression_fit_verdict(r2: float | None, split: str | None = None) -> str:
-    """Band reading of a regression R2, naming the split it was measured on."""
-    if r2 is None or pd.isna(r2):
-        return ""
-    if r2 < 0:
-        reading = "worse than just predicting the mean - no usable signal on this split"
-    elif r2 < 0.3:
-        reading = "weak - little of the variation is explained"
-    elif r2 < 0.6:
-        reading = "moderate"
-    elif r2 < 0.8:
-        reading = "strong"
-    elif split is not None and split.lower() == "train":
-        reading = (
-            "very strong, but these are the months the model was fitted on - switch the selector "
-            "to Test to check it is not memorisation"
-        )
-    else:
-        reading = "very strong"
-    where = f" on the {split.lower()} split" if split else ""
-    return f"R2 = {r2:.2f}{where}: {reading}."
 
 def residual_verdict(y_true, y_pred) -> str:
     """Plain reading of regression residuals: systematic bias and leftover autocorrelation."""
@@ -1119,7 +1061,7 @@ def garch_persistence_note(persistence: float) -> str:
         return (
             f"Estimated persistence (α+β) = {persistence:.2f}: volatility shocks decay very slowly, so "
             "the forecast stays close to the current volatility level - a near-flat line is the genuine "
-            "model output here, not an error."
+            "model output here."
         )
     return (
         f"Estimated persistence (α+β) = {persistence:.2f}: volatility shocks fade at this rate month to "
@@ -1142,24 +1084,24 @@ def ols_assumptions_note(ols: dict) -> str:
     )
     cond = ols["condition_number"]
     if cond < 30:
-        cond_read = "the condition number is low, so multicollinearity is not a concern"
+        cond_read = "the condition number is low, so multicollinearity is not a concern."
     elif cond < 100:
         cond_read = (
             "the condition number is moderate - some multicollinearity, so individual coefficients "
-            "are less precisely pinned down, though the overall fit is unaffected"
+            "are less precisely pinned down, though the overall fit is unaffected."
         )
     elif cond < 1000:
         cond_read = (
             "the condition number is high - strong multicollinearity, so individual coefficient "
-            "sizes and signs are unstable and should be read with caution"
+            "sizes and signs are unstable and should be read with caution."
         )
     else:
         cond_read = (
             "the condition number is extreme - the entered features are close to linearly "
             "dependent, so individual coefficients are not trustworthy even where the overall fit "
-            "is fine"
+            "is fine."
         )
     return (
         f"{dw_read}; {jb_read} (JB p = {format_pvalue(ols['jarque_bera_p'])}); {cond_read} "
-        f"({cond:,.0f}; rule of thumb: below 30 fine, 30-100 moderate, above 100 problematic)."
+        f"Rule of thumb: below 30 fine, 30-100 moderate, above 100 problematic)."
     )

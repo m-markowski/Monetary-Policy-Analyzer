@@ -119,7 +119,7 @@ def permutation_importance_scores(
     Permutation importance on a held-out split, scaled to 0-100.
 
     Model-agnostic, so it covers the estimators without a native importance
-    (KNN, SVM, neural). Negative drops are clipped to zero.
+    (SVM, neural). Negative drops are clipped to zero.
     Blend/Stack fall back to a plain shuffle loop because sklearn's implementation requires
     a fit method they do not have.
 
@@ -138,9 +138,10 @@ def permutation_importance_scores(
             model, X, y, scoring=scoring, n_repeats=n_repeats, random_state=random_state, n_jobs=-1
         )
         drops = result.importances_mean
-    except TypeError:  # sklearn's InvalidParameterError subclasses TypeError
-        # Blend/Stack are assembled already fitted and expose no sklearn fit, which
-        # permutation_importance insists on; score the same shuffle drops directly.
+    except TypeError:
+        # The loop is single-threaded and each score call re-predicts the whole base
+        # roster, so cap the repeats; the 0-100 relative ranking is stable at 5.
+        n_repeats = min(n_repeats, 5)
         scorer = get_scorer(scoring) if isinstance(scoring, str) else scoring
         base = scorer(model, X, y)
         rng = np.random.default_rng(random_state)
@@ -156,18 +157,23 @@ def permutation_importance_scores(
     return normalize_importance(np.clip(drops, 0, None), X.columns)
 
 
-def feature_group_importance(importance: pd.Series, group_of) -> pd.Series:
+def feature_group_importance(importance: pd.Series, group_of, all_groups=None) -> pd.Series:
     """
     Aggregate feature importance into business groups (rates/macro/market/...).
 
     Args:
         importance (pd.Series): Per-feature importance (e.g. from `native_importance`).
         group_of (callable): Maps a feature name to its group label.
+        all_groups (list | None): Full set of group labels to report. Groups with no
+            scored feature show as zero instead of dropping out - native importance
+            only covers the features surviving selection.
 
     Returns:
         pd.Series: Per-group importance, re-scaled to 0-100, largest first.
     """
     grouped = importance.groupby(importance.index.map(group_of)).sum()
+    if all_groups is not None:
+        grouped = grouped.reindex(all_groups, fill_value=0.0)
     top = grouped.max()
     if top > 0:
         grouped = 100.0 * grouped / top
@@ -214,10 +220,10 @@ def partial_dependence_data(
     """
     Partial dependence of the model on one feature, averaged over the sample.
 
-    Blend/Stack expose no sklearn `fit`, which `sklearn.inspection.partial_dependence`
-    insists on, so they fall back to a manual sweep: the feature is set to each grid
-    value across the whole sample and the predictions averaged - the definition of
-    partial dependence. The grid spans the 5th-95th percentile, matching sklearn.
+    Blend/Stack and the Keras estimators are not sklearn estimators, which
+    `sklearn.inspection.partial_dependence` insists on, so they fall back to a manual sweep:
+    the feature is set to each grid value across the whole sample and the predictions
+    averaged - the definition of partial dependence. The grid spans the 5th-95th percentile, matching sklearn.
 
     Args:
         model: A fitted estimator or Pipeline.
@@ -235,7 +241,7 @@ def partial_dependence_data(
         result = partial_dependence(model, X, [feature], grid_resolution=grid_resolution, kind="average")
         grid = result.get("grid_values", result.get("values"))[0]
         return {"grid": np.asarray(grid), "average": np.asarray(result["average"])}
-    except TypeError:  # sklearn's InvalidParameterError subclasses TypeError
+    except (TypeError, ValueError, AttributeError):
         lo, hi = np.nanpercentile(X[feature].to_numpy(dtype=float), [5.0, 95.0])
         grid = np.linspace(lo, hi, grid_resolution)
         X_mod = X.copy()
