@@ -1,18 +1,24 @@
-# Python-generated files
+.venv/
+.runtime/
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.egg-info/
 build/
 dist/
-wheels/
-*.egg-info
+.ruff_cache/
 
-# Virtual environments
-.venv
+.env
+.env.*
+!.env.example
+!.env.template
+**/.streamlit/secrets.toml
 
-# Others
-**/.ipynb_checkpoints/
-utils/logs/*
-!logs/.gitkeep
-.egg-info/
-data/cache/*
-data/models/*
+/data/cache/*
+!/data/cache/.gitkeep
+/data/models/*
+!/data/models/.gitkeep
+
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/

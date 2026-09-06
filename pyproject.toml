@@ -1,0 +1,59 @@
+[project]
+name = "monetary-policy-analyzer"
+version = "0.1.0"
+description = "Macroeconomic analysis and monetary-policy modelling in Streamlit."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "arch>=7.2,<9",
+    "fredapi>=0.5.2,<1",
+    "jinja2>=3.1.2,<4",
+    "joblib>=1.4,<2",
+    "keras>=3.5,<4",
+    "lightgbm>=4.6,<5",
+    "msvc-runtime>=14.44.35112,<15",
+    "numpy>=1.26.4,<2",
+    "optuna>=4,<5",
+    "pandas>=2.2.3,<3",
+    "plotly>=6,<7",
+    "pyarrow>=18",
+    "python-dotenv>=1,<2",
+    "pyyaml>=6,<7",
+    "scikit-learn>=1.6.1,<1.8",
+    "scipy>=1.13,<2",
+    "shap>=0.48,<0.50",
+    "statsmodels>=0.14.4,<0.15",
+    "streamlit>=1.51,<2",
+    "tensorflow>=2.18,<2.22",
+    "xgboost>=2.1.4,<3.1",
+    "yfinance>=0.2.66,<2",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.16.6,<0.17"]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["config", "src", "src.models", "utils"]
+include-package-data = false
+
+[tool.setuptools.package-data]
+config = ["config.yaml"]
+
+[tool.uv]
+environments = ["sys_platform == 'win32' and platform_machine == 'AMD64'"]
+required-environments = ["sys_platform == 'win32' and platform_machine == 'AMD64'"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["."]
+extend-exclude = [".runtime", "data"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "C4", "SIM", "RUF100"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "src", "utils"]
