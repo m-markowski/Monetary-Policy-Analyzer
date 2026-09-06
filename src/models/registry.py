@@ -45,7 +45,7 @@ def cache_key(economy: str, task: str, target: str, horizon: int, split: str) ->
 
 def data_signature(X: pd.DataFrame, y) -> dict:
     """
-    Fingerprint the modelling data so a shipped artifact can detect staleness.
+    Fingerprint the modelling data so a saved artifact can detect staleness.
 
     Args:
         X (pd.DataFrame): Feature matrix.
@@ -106,9 +106,7 @@ def build_metadata(
         "best_model": best,
         "cv_scores": cv_scores,
         "params": params,
-        "leaderboard": (
-            leaderboard.reset_index().to_dict(orient="records") if leaderboard is not None else None
-        ),
+        "leaderboard": (leaderboard.reset_index().to_dict(orient="records") if leaderboard is not None else None),
         "signature": signature,
         "trained_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -165,7 +163,7 @@ def load_artifacts(key: str, directory: Path = MODELS_DIR) -> dict | None:
 
 def is_stale(metadata: dict, signature: dict) -> bool:
     """
-    Whether a shipped artifact no longer matches the current data.
+    Whether a saved artifact no longer matches the current data.
 
     Compares content hashes and row count; a mismatch means the dataset grew or
     changed since training, so a live refit is warranted.

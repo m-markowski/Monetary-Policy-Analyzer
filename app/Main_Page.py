@@ -106,13 +106,13 @@ full_refresh = col_b.checkbox("Force full refresh (ignore cache, repull all hist
 
 if reload_clicked:
     metas = {}
-    with st.status("Fetching from FRED + yfinance…", expanded=True) as status:
+    with st.status("Fetching from FRED + yfinance...", expanded=True) as status:
         for eco in ECONOMIES:
             st.write(f"Building {eco.upper()} dataset…")
             metas[eco] = build_and_save(eco, full_refresh=full_refresh)
             m = metas[eco]
             st.write(
-                f"{eco.upper()} ready: {m['working_start']} — {m['working_end']} "
+                f"{eco.upper()} ready: {m['working_start']} - {m['working_end']} "
                 f"({m['n_rows']:,} rows, {m['n_features']} features)"
             )
         save_metadata(metas)
@@ -133,9 +133,9 @@ for eco in ECONOMIES:
 
 ov = meta["overlap"]
 if ov["has_overlap"]:
-    st.success(f"Common comparison window (USA & Eurozone): **{ov['start']} — {ov['end']}**")
+    st.success(f"Common comparison window (USA & Eurozone): **{ov['start']} - {ov['end']}**")
 else:
-    st.warning("The two economies do not overlap — cross-economy comparison will be limited.")
+    st.warning("The two economies do not overlap - cross-economy comparison will be limited.")
 
 with st.expander("Preview cached data"):
     eco = st.selectbox("Economy", ECONOMIES, format_func=str.upper)

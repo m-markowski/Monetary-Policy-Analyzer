@@ -1,7 +1,7 @@
 import numpy as np
+from config.settings import SEED
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import log_loss, root_mean_squared_error
-from config.settings import SEED
 
 
 def stack_meta_features(models: dict, X, task: str) -> np.ndarray:

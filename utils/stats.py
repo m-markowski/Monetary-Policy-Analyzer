@@ -114,7 +114,6 @@ def compare_groups(
     series: pd.Series,
     labels: pd.Series,
     alpha: float = 0.05,
-    parametric: bool | None = None,
     min_count: int = 2,
 ) -> dict | None:
     """
@@ -123,13 +122,12 @@ def compare_groups(
     Checks the parametric preconditions (per-group normality via Shapiro/Jarque-
     Bera, equal variances via Levene), then routes to a t-test/ANOVA when they
     hold and to Mann-Whitney/Kruskal-Wallis otherwise, with a matching post-hoc
-    for three or more groups. Pass `parametric` to override the automatic choice.
+    for three or more groups.
 
     Args:
         series (pd.Series): Numeric variable to compare.
         labels (pd.Series): Categorical group labels, index-aligned with `series`.
         alpha (float): Significance level for preconditions and the verdict.
-        parametric (bool | None): Force parametric/nonparametric; None auto-selects.
         min_count (int): Minimum observations for a group to be kept.
 
     Returns:
@@ -147,9 +145,7 @@ def compare_groups(
 
     normal = all((stats.shapiro(a).pvalue if a.size <= 5000 else stats.jarque_bera(a).pvalue) > alpha for a in arrays)
     equal_var = stats.levene(*arrays).pvalue > alpha
-    forced = parametric is not None
-    if parametric is None:
-        parametric = normal and equal_var
+    parametric = normal and equal_var
 
     n_groups = len(arrays)
     post_hoc = None
@@ -174,9 +170,7 @@ def compare_groups(
     normality_note = "all groups ~normal" if normal else "non-normal group(s)"
     variance_note = "equal variances" if equal_var else "unequal variances"
     route = "parametric" if parametric else "nonparametric"
-    reason = f"{n_groups} groups; {normality_note}, {variance_note} (Shapiro/JB + Levene) -> {route}: {test}" + (
-        " (manual override)." if forced else "."
-    )
+    reason = f"{n_groups} groups; {normality_note}, {variance_note} (Shapiro/JB + Levene) -> {route}: {test}."
 
     return {
         "test": test,

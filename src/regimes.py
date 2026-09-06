@@ -114,6 +114,7 @@ def available_regimes(df: pd.DataFrame, economy: str) -> dict[str, pd.Series]:
     }
     return {name: series for name, series in candidates.items() if series is not None}
 
+
 def regime_source_columns(df: pd.DataFrame, economy: str) -> list[str]:
     """
     Return the base columns the available regimes are derived from.

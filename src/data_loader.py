@@ -5,7 +5,6 @@ from datetime import datetime
 import pandas as pd
 import yfinance as yf
 from config.settings import EconomyConfig
-from utils.logger import exception_logger
 
 
 class EconomyDataLoader:
@@ -80,8 +79,7 @@ class EconomyDataLoader:
             return self.metadata_cache[series_id]
         try:
             info = self.fred.get_series_info(series_id).to_dict()
-        except Exception as e:
-            exception_logger.warning(f"Metadata fetch failed for {series_id}: {e}")
+        except Exception:
             info = None
         self.metadata_cache[series_id] = info
         return info
@@ -142,8 +140,8 @@ class EconomyDataLoader:
                 if ts.tzinfo is not None:
                     ts = ts.tz_convert(None)
                 last = ts.normalize()
-        except Exception as e:
-            exception_logger.warning(f"yfinance metadata fetch failed for {ticker}: {e}")
+        except Exception:
+            pass
         self.ticker_cache[ticker] = last
         return last
 
@@ -183,8 +181,6 @@ class EconomyDataLoader:
                     kept.append([sid, name])
             self.fred_config[bucket] = kept
             self.dropped_fred.extend(dropped)
-            for sid, name, reason in dropped:
-                exception_logger.warning(f"Dropped stale series {sid} ({name}): {reason}")
 
         kept, dropped = [], []
         for ticker, name in self.market_tickers:
@@ -195,8 +191,6 @@ class EconomyDataLoader:
                 kept.append([ticker, name])
         self.market_tickers = kept
         self.dropped_tickers = dropped
-        for ticker, name, reason in dropped:
-            exception_logger.warning(f"Dropped stale ticker {ticker} ({name}): {reason}")
 
     def resolve_date_range(self, start_date: str | None, end_date: str | None) -> tuple[str, str]:
         """
@@ -244,14 +238,12 @@ class EconomyDataLoader:
                 return data
             except Exception as e:
                 if attempt == max_retries:
-                    exception_logger.error(f"Failed to fetch {series_id} after {max_retries} attempts: {e}")
                     self.record(
                         "error",
                         f"Failed to fetch {series_id} after {max_retries} attempts: {e}",
                         stage="fetch",
                     )
                     raise
-                exception_logger.warning(f"Attempt {attempt}/{max_retries} failed for {series_id}: {e}")
                 self.record(
                     "warning",
                     f"Attempt {attempt}/{max_retries} failed for {series_id}: {e}",
@@ -281,16 +273,12 @@ class EconomyDataLoader:
 
         results = {}
         with ThreadPoolExecutor(max_workers=6) as executor:
-            future_to_series = {executor.submit(fetch_job, series_id): series_id for series_id in all_series}
-            for future in as_completed(future_to_series):
-                expected_series_id = future_to_series[future]
-                try:
-                    series_id, data = future.result()
-                    if data is not None:
-                        results[series_id] = data
-                except Exception:
-                    exception_logger.error(f"Thread crashed for {expected_series_id}", exc_info=True)
-                    self.record("error", f"Thread crashed for {expected_series_id}", stage="fetch")
+            futures = [executor.submit(fetch_job, series_id) for series_id in all_series]
+            for future in as_completed(futures):
+                series_id, data = future.result()
+                if data is not None:
+                    results[series_id] = data
+
         if not results:
             return pd.DataFrame()
 
@@ -323,7 +311,6 @@ class EconomyDataLoader:
                 if not df.empty:
                     data_dict[ticker] = df["Close"]
             except Exception as e:
-                exception_logger.error(f"Failed to fetch {ticker}: {e}")
                 self.record("error", f"Failed to fetch {ticker}: {e}", stage="fetch")
 
         if data_dict:
@@ -357,7 +344,6 @@ class EconomyDataLoader:
         elif not market_df.empty:
             df = market_df
         else:
-            exception_logger.error("No data could be fetched from any source.")
             raise ValueError("No data could be fetched from any source")
 
         df = df.sort_values("date").reset_index(drop=True)
@@ -397,7 +383,6 @@ class EconomyDataLoader:
             return "daily"
         info = self.get_series_metadata(col)
         if info is None:
-            exception_logger.error(f"No frequency detected for {col} (no metadata)")
             return None
         return self.FREQ_MAP.get((info.get("frequency_short") or "").upper())
 
@@ -456,21 +441,22 @@ class EconomyDataLoader:
                 self.skipped_features.append({"feature": f"{col}_vol_*", "reason": "near-constant series (std ~ 0)"})
             self.feature_manifest.append({"base": col, "frequency": "daily", "families": families})
 
-        # Process weekly, monthly, and quarterly data with period-based changes
+        # Process weekly, monthly, and quarterly data with period-based changes.
         frequencies = {"week": "W", "month": "M", "quarter": "Q"}
         for freq_name, freq_code in frequencies.items():
-            df[f"year_{freq_name}"] = df["date"].dt.to_period(freq_code)
+            period_index = df["date"].dt.to_period(freq_code)
+            changes = {}
             for col in freq_classification[freq_name + "ly"]:
                 if col not in df.columns:
                     continue
                 # Get last non-null observation per period
-                period_data = df.groupby(f"year_{freq_name}")[col].last()
-                for periods, label in [tuple(period) for period in self.features[f"{freq_name}ly_periods"]]:
-                    change_series = period_data.pct_change(periods)
-                    df[f"{col}_chg_{label}"] = df[f"year_{freq_name}"].map(change_series)
+                period_data = df.groupby(period_index)[col].last()
+                for periods, label in self.features[f"{freq_name}ly_periods"]:
+                    changes[f"{col}_chg_{label}"] = period_index.map(period_data.pct_change(periods))
                 labels = [label for _, label in self.features[f"{freq_name}ly_periods"]]
                 self.feature_manifest.append({"base": col, "frequency": f"{freq_name}ly", "families": {"chg": labels}})
-            df.drop(columns=[f"year_{freq_name}"], axis=1, inplace=True, errors="ignore")
+            if changes:
+                df = pd.concat([df, pd.DataFrame(changes)], axis=1)
         return df
 
     def create_yield_curve_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -497,9 +483,10 @@ class EconomyDataLoader:
                 ("psprd_ib_3m_ecb", "rate_ib_3m", "rate_ecb_dep", "Market expectations vs ECB stance"),
             ],
         }
+        spreads = {}
         for out, a, b, desc in specs.get(self.economy, []):
             if a in df.columns and b in df.columns:
-                df[out] = df[a] - df[b]
+                spreads[out] = df[a] - df[b]
                 self.feature_manifest.append(
                     {
                         "base": out,
@@ -517,6 +504,8 @@ class EconomyDataLoader:
                         "description": desc,
                     }
                 )
+        if spreads:
+            df = pd.concat([df, pd.DataFrame(spreads)], axis=1)
         return df
 
     def engineer_all_features(self, df: pd.DataFrame) -> pd.DataFrame:

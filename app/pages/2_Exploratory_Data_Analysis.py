@@ -44,6 +44,25 @@ from utils.structure import (
 
 st.set_page_config(page_title="Exploratory Data Analysis", layout="wide")
 
+# Page switching drops the widget-keyed state of non-rendered pages, so reassign
+# every EDA key at the top of each run to keep selections alive across pages.
+EDA_KEY_PREFIXES = (
+    "overview_",
+    "feat_",
+    "dist_",
+    "rel_",
+    "scatter_",
+    "corr_",
+    "pc_",
+    "regime_",
+    "reg_",
+    "struct_",
+    "last_economy",
+)
+for k in list(st.session_state):
+    if str(k).startswith(EDA_KEY_PREFIXES):
+        st.session_state[k] = st.session_state[k]
+
 # Columns carrying an engineered suffix; the picker offers base levels only and
 # derives returns/changes on the fly via the transform selector.
 ENGINEERED_SUFFIX = re.compile(r"_(?:ret|ma|vol)_\d+d$|_chg_\w+$")
@@ -283,19 +302,6 @@ with st.sidebar:
         st.session_state["feat_1"] = DEFAULT_VARIABLE.get(economy, "None")
         for k in ("feat_2", "feat_3", "feat_4"):
             st.session_state[k] = "None"
-        for k in (
-            "scatter_x",
-            "scatter_y",
-            "scatter_color",
-            "pc_x",
-            "pc_y",
-            "pc_covars",
-            "corr_cols",
-            "reg_a",
-            "reg_b",
-            "struct_cols",
-        ):
-            st.session_state.pop(k, None)
         st.session_state["corr_touched"] = False
         st.session_state["struct_touched"] = False
         st.session_state["last_economy"] = economy
@@ -326,9 +332,9 @@ with tab_overview:
         horizontal=True,
         key="overview_transform",
     )
+    st.session_state.setdefault("overview_monthly", True)
     monthly = top[1].toggle(
         "Collapse to monthly",
-        value=True,
         key="overview_monthly",
         help=(
             "Sample one value per month instead of daily, so held policy rates and "
@@ -338,9 +344,9 @@ with tab_overview:
     )
     overlay_returns = False
     if chart_transform == "Level":
+        st.session_state.setdefault("overview_overlay", True)
         overlay_returns = top[2].toggle(
             "Overlay log return (%)",
-            value=True,
             key="overview_overlay",
             help=(
                 "Add each feature's log return on a secondary axis, in the same panel, so you "
@@ -356,7 +362,7 @@ with tab_overview:
         available = [o for o in options if o not in taken]
         key = f"feat_{i + 1}"
         if key in st.session_state and st.session_state[key] not in available:
-            del st.session_state[key]
+            st.session_state[key] = "None"
         selected.append(col.selectbox(f"Feature {i + 1}", available, key=key))
 
     chart_features = [c for c in selected if c != "None"]
@@ -385,13 +391,19 @@ with tab_overview:
 with tab_dist:
     ctrl = st.columns([3, 2, 1])
     default_var = DEFAULT_VARIABLE.get(economy)
-    var_index = base_columns.index(default_var) if default_var in base_columns else 0
-    variable = ctrl[0].selectbox("Variable", base_columns, index=var_index, key="dist_variable")
-    transform = ctrl[1].selectbox("Transform", allowed_transforms(family_of(variable)), key="dist_transform")
-    alpha = ctrl[2].selectbox("alpha (significance)", [0.10, 0.05, 0.01], index=1, key="dist_alpha")
+    if st.session_state.get("dist_variable") not in base_columns:
+        st.session_state["dist_variable"] = default_var if default_var in base_columns else base_columns[0]
+    variable = ctrl[0].selectbox("Variable", base_columns, key="dist_variable")
+    transforms = allowed_transforms(family_of(variable))
+    if st.session_state.get("dist_transform") not in transforms:
+        st.session_state["dist_transform"] = "Level"
+    transform = ctrl[1].selectbox("Transform", transforms, key="dist_transform")
+    st.session_state.setdefault("dist_alpha", 0.05)
+    alpha = ctrl[2].selectbox("alpha (significance)", [0.10, 0.05, 0.01], key="dist_alpha")
+
+    st.session_state.setdefault("dist_monthly", True)
     monthly = st.toggle(
         "Collapse to monthly",
-        value=True,
         key="dist_monthly",
         help=(
             "Sample one value per month instead of daily. This is the main defence against "
@@ -422,8 +434,7 @@ with tab_dist:
                 caption_parts.append("Values are in % per observation.")
             if monthly:
                 caption_parts.append(
-                    'Count is after monthly sampling. Turn off "Collapse to monthly" for the '
-                    "full daily count."
+                    'Count is after monthly sampling. Turn off "Collapse to monthly" for the full daily count.'
                 )
             if caption_parts:
                 st.caption(" ".join(caption_parts))
@@ -501,9 +512,9 @@ with tab_rel:
         st.info("Need at least two base variables to explore relationships.")
     else:
         rel_transform = "Level"
+        st.session_state.setdefault("rel_monthly", True)
         rel_monthly = st.toggle(
             "Collapse to monthly",
-            value=True,
             key="rel_monthly",
             help=(
                 "Sample one value per month instead of daily. Level co-movement barely "
@@ -522,6 +533,13 @@ with tab_rel:
 
         st.markdown("**Pairwise scatter**")
         sc = st.columns(3)
+
+        for k in ("scatter_x", "scatter_y"):
+            if st.session_state.get(k, "None") not in ("None", *base_columns):
+                st.session_state[k] = "None"
+        if st.session_state.get("scatter_color", "None") not in ("None", *regimes):
+            st.session_state["scatter_color"] = "None"
+
         x_sel = st.session_state.get("scatter_x", "None")
         y_sel = st.session_state.get("scatter_y", "None")
         x_options = ["None", *[c for c in base_columns if c != y_sel]]
@@ -587,6 +605,8 @@ with tab_rel:
             dynamic_default = base_columns[: min(7, len(base_columns))]
         if not st.session_state.get("corr_touched"):
             st.session_state["corr_cols"] = dynamic_default
+        elif "corr_cols" in st.session_state:
+            st.session_state["corr_cols"] = [c for c in st.session_state["corr_cols"] if c in base_columns]
 
         corr_cols = st.multiselect("Variables", base_columns, key="corr_cols", on_change=freeze_corr_selection)
         st.caption(
@@ -644,6 +664,11 @@ with tab_rel:
             "Association between two variables after removing the linear effect of one or more control variables."
         )
         pc = st.columns(3)
+
+        for k in ("pc_x", "pc_y"):
+            if st.session_state.get(k, "None") not in ("None", *base_columns):
+                st.session_state[k] = "None"
+
         pc_x_sel = st.session_state.get("pc_x", "None")
         pc_y_sel = st.session_state.get("pc_y", "None")
         pc_x_options = ["None", *[c for c in base_columns if c != pc_y_sel]]
@@ -691,19 +716,26 @@ with tab_regime:
     else:
         ctrl = st.columns([3, 2, 2, 1])
         default_var = DEFAULT_VARIABLE.get(economy)
-        var_index = base_columns.index(default_var) if default_var in base_columns else 0
-        cmp_var = ctrl[0].selectbox("Variable", base_columns, index=var_index, key="regime_variable")
-        cmp_transform = ctrl[1].selectbox("Transform", allowed_transforms(family_of(cmp_var)), key="regime_transform")
+        if st.session_state.get("regime_variable") not in base_columns:
+            st.session_state["regime_variable"] = default_var if default_var in base_columns else base_columns[0]
+        cmp_var = ctrl[0].selectbox("Variable", base_columns, key="regime_variable")
+        cmp_transforms = allowed_transforms(family_of(cmp_var))
+        if st.session_state.get("regime_transform") not in cmp_transforms:
+            st.session_state["regime_transform"] = "Level"
+        cmp_transform = ctrl[1].selectbox("Transform", cmp_transforms, key="regime_transform")
+        if st.session_state.get("regime_group") not in regimes:
+            st.session_state["regime_group"] = next(iter(regimes))
         group_choice = ctrl[2].selectbox(
             "Group by regime",
             list(regimes),
             key="regime_group",
             help=interpret.REGIME_AVAILABILITY_HELP,
         )
-        cmp_alpha = ctrl[3].selectbox("alpha", [0.10, 0.05, 0.01], index=1, key="regime_alpha")
+        st.session_state.setdefault("regime_alpha", 0.05)
+        cmp_alpha = ctrl[3].selectbox("alpha", [0.10, 0.05, 0.01], key="regime_alpha")
+        st.session_state.setdefault("regime_monthly", True)
         cmp_monthly = st.toggle(
             "Collapse to monthly",
-            value=True,
             key="regime_monthly",
             help=(
                 "Sample one value per month instead of daily. This is the main defence against "
@@ -889,12 +921,13 @@ with tab_regime:
 
             cc = st.columns(2)
             reg_names = list(regimes_window)
-            default_a = reg_names[0] if reg_names else "None"
-            default_b = reg_names[1] if len(reg_names) > 1 else default_a
-            reg_a_sel = st.session_state.get("reg_a", default_a)
-            reg_b_sel = st.session_state.get("reg_b", default_b)
-            reg_a_options = [r for r in reg_names if r != reg_b_sel]
-            reg_b_options = [r for r in reg_names if r != reg_a_sel]
+            if st.session_state.get("reg_a") not in reg_names:
+                st.session_state["reg_a"] = reg_names[0]
+            reg_b_val = st.session_state.get("reg_b")
+            if reg_b_val not in reg_names or reg_b_val == st.session_state["reg_a"]:
+                st.session_state["reg_b"] = next(r for r in reg_names if r != st.session_state["reg_a"])
+            reg_a_options = [r for r in reg_names if r != st.session_state["reg_b"]]
+            reg_b_options = [r for r in reg_names if r != st.session_state["reg_a"]]
             reg_a = cc[0].selectbox("Regime 1", reg_a_options, key="reg_a")
             reg_b = cc[1].selectbox("Regime 2", reg_b_options, key="reg_b")
             assoc = categorical_association(
@@ -931,9 +964,9 @@ with tab_structure:
     if len(base_columns) < 3:
         st.info("Need at least three base variables to explore structure.")
     else:
+        st.session_state.setdefault("struct_monthly", True)
         struct_monthly = st.toggle(
             "Collapse to monthly",
-            value=True,
             key="struct_monthly",
             help=(
                 "Cluster on one value per month instead of daily, so held rates and "
@@ -952,6 +985,8 @@ with tab_structure:
                     if col not in default_cols:
                         default_cols.append(col)
             st.session_state["struct_cols"] = default_cols[:6]
+        elif "struct_cols" in st.session_state:
+            st.session_state["struct_cols"] = [c for c in st.session_state["struct_cols"] if c in base_columns]
 
         struct_cols = st.multiselect(
             "Features to cluster on",
@@ -1066,6 +1101,9 @@ with tab_structure:
                     if not regimes:
                         st.info("No rule-based regimes are available for this economy to compare.")
                     else:
+                        if st.session_state.get("struct_regime") not in regimes:
+                            st.session_state["struct_regime"] = next(iter(regimes))
+
                         reg_choice = st.selectbox(
                             "Compare clusters with",
                             list(regimes),

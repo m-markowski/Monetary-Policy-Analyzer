@@ -1,6 +1,7 @@
 import numpy as np
-import pandas as pd
 import optuna
+import pandas as pd
+from config.settings import SEED
 from lightgbm import LGBMClassifier, LGBMRegressor
 from scipy.stats import loguniform, randint, uniform
 from sklearn.base import clone
@@ -10,20 +11,16 @@ from sklearn.ensemble import (
     RandomForestClassifier,
     RandomForestRegressor,
 )
+from sklearn.feature_selection import SelectKBest, f_classif, f_regression
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, LogisticRegression, Ridge
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit, cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.feature_selection import SelectKBest, f_classif, f_regression
 from sklearn.svm import SVC, SVR
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from src.models.evaluate import CV_SCORING
 from xgboost import XGBClassifier, XGBRegressor
 
-from src.models.evaluate import CV_SCORING
-from config.settings import SEED
-
-# Higher-is-better metrics; only these support the "stop when good enough" hook.
-MAXIMISE_METRICS = ("ROC-AUC (macro/OvR)", "F1-macro", "Balanced accuracy")
 # Regression selects on RMSE, not R2: near-constant target windows (ZIRP-era CV folds,
 # the COVID dev window) make fold R2 explode while RMSE stays comparable across models.
 DEFAULT_SCORING = {"regression": "RMSE", "classification": "ROC-AUC (macro/OvR)"}
@@ -188,9 +185,7 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
 
     return {
         "Logistic regression": {
-            "estimator": LogisticRegression(
-                solver="saga", max_iter=5000, class_weight=cw, random_state=random_state
-            ),
+            "estimator": LogisticRegression(solver="saga", max_iter=5000, class_weight=cw, random_state=random_state),
             "space": {
                 "model__C": ("float", 1e-3, 1e2, True),
                 "model__penalty": ("cat", ["l1", "l2"]),
@@ -215,9 +210,7 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
             "needs_scaling": False,
         },
         "Random forest": {
-            "estimator": RandomForestClassifier(
-                class_weight=cw, random_state=random_state, n_jobs=-1
-            ),
+            "estimator": RandomForestClassifier(class_weight=cw, random_state=random_state, n_jobs=-1),
             "space": {
                 "model__n_estimators": ("int", 100, 600),
                 "model__max_depth": ("int", 3, 16),
@@ -257,7 +250,7 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
                 "model__min_child_samples": ("int", 5, 30),
             },
             "needs_scaling": False,
-        }
+        },
     }
 
 
@@ -294,6 +287,7 @@ def build_pipeline(
     pipe = Pipeline(steps)
     pipe.set_output(transform="pandas")
     return pipe
+
 
 def auto_k_features(n_rows: int, n_features: int, n_splits: int = 5) -> int:
     """
@@ -383,9 +377,7 @@ def search_estimator(pipe, space, X, y, scoring, cv, budget, random_state=SEED):
         candidate = clone(pipe).set_params(**suggest_from_space(trial, space))
         return float(np.mean(cross_val_score(candidate, X, y, scoring=scoring, cv=cv)))
 
-    study = optuna.create_study(
-        direction="maximize", sampler=optuna.samplers.TPESampler(seed=random_state)
-    )
+    study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=random_state))
     study.optimize(objective, n_trials=cfg["n_trials"])
     best = clone(pipe).set_params(**study.best_params).fit(X, y)
     return best, study.best_params, float(study.best_value)
@@ -402,7 +394,6 @@ def train_roster(
     models=None,
     class_weight=True,
     k_features="auto",
-    early_stop=None,
     random_state=SEED,
     progress=None,
 ) -> dict:
@@ -424,8 +415,6 @@ def train_roster(
         class_weight (bool): Pass 'balanced' weighting where supported (clf).
         k_features (int | str): 'auto' sizes the in-CV SelectKBest to the smallest CV
             fold (see `auto_k_features`), or an explicit count.
-        early_stop (float | None): Stop once a model's CV score reaches this value
-            (only for higher-is-better metrics).
         random_state (int): Seed.
         progress (callable | None): Called as progress(done, total, name, cv_score)
             after each model, for a UI progress bar.
@@ -453,19 +442,14 @@ def train_roster(
 
     fitted, cv_scores, params = {}, {}, {}
     total = len(roster)
-    can_early_stop = early_stop is not None and scoring in MAXIMISE_METRICS
     for done, (name, cfg) in enumerate(roster.items(), start=1):
         pipe = build_pipeline(cfg["estimator"], cfg["needs_scaling"], task=task, k_features=k_features)
-        model, best_params, cv_score = search_estimator(
-            pipe, cfg["space"], X, y, scorer, cv, budget, random_state
-        )
+        model, best_params, cv_score = search_estimator(pipe, cfg["space"], X, y, scorer, cv, budget, random_state)
         fitted[name] = model
         cv_scores[name] = cv_score
         params[name] = best_params
         if progress:
             progress(done, total, name, cv_score)
-        if can_early_stop and cv_score >= early_stop:
-            break
 
     best = max(cv_scores, key=cv_scores.get) if cv_scores else None
     return {

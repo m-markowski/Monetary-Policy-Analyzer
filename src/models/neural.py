@@ -1,11 +1,15 @@
+import os
 import tempfile
 from pathlib import Path
 
-import keras
 import numpy as np
+from config.settings import SEED
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
-from config.settings import SEED
+
+# Quiet TF logs
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 
 
 def make_sequences(values: np.ndarray, lookback: int) -> np.ndarray:
@@ -44,6 +48,8 @@ def build_network(kind, input_shape, n_outputs, task, units, dropout, l2, learni
     Returns:
         keras.Model: The compiled model.
     """
+    import keras
+
     reg = keras.regularizers.l2(l2)
     model = keras.Sequential([keras.layers.Input(shape=input_shape)])
     if kind == "mlp":
@@ -112,6 +118,8 @@ class KerasEstimator:
         return scaled
 
     def fit(self, X, y):
+        import keras
+
         keras.utils.set_random_seed(self.random_state)
         # Seeds the Python/NumPy/TF RNGs. GPU kernels and some parallel ops stay
         # nondeterministic, so neural runs are close but not bit-identical.
@@ -171,6 +179,8 @@ class KerasEstimator:
         return state
 
     def __setstate__(self, state):
+        import keras
+
         blob = state.pop("model_bytes_", None)
         self.__dict__.update(state)
         if blob is not None:
@@ -194,14 +204,15 @@ def neural_models(task, lookback=6, class_weight=True, random_state=SEED) -> dic
         dict: Model name -> unfitted KerasEstimator.
     """
     common = {"class_weight": class_weight, "random_state": random_state}
-    roster = {
+    return {
         "MLP": KerasEstimator(task, kind="mlp", **common),
         "LSTM": KerasEstimator(task, kind="lstm", lookback=lookback, **common),
     }
-    return roster
 
 
-def fit_neural_models(X, y, task, *, models=None, lookback=6, class_weight=True, random_state=SEED, progress=None) -> dict:
+def fit_neural_models(
+    X, y, task, *, models=None, lookback=6, class_weight=True, random_state=SEED, progress=None
+) -> dict:
     """
     Fit the neural roster on the training split.
 

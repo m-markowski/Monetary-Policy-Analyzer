@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 
-def to_monthly(daily: pd.DataFrame) -> pd.DataFrame | None:
+def to_monthly(daily: pd.DataFrame) -> pd.DataFrame:
     """
     Collapse the daily master to a month-end snapshot for modelling.
 
@@ -15,11 +15,8 @@ def to_monthly(daily: pd.DataFrame) -> pd.DataFrame | None:
         daily (pd.DataFrame): Date-indexed daily master dataset.
 
     Returns:
-        pd.DataFrame | None: Month-end-indexed frame, or None if the index is not a
-        DatetimeIndex.
+        pd.DataFrame: Month-end-indexed frame.
     """
-    if not isinstance(daily.index, pd.DatetimeIndex):
-        return None
     return daily.resample("ME").last()
 
 

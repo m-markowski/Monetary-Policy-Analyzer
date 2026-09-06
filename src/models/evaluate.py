@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
@@ -12,6 +14,7 @@ from sklearn.metrics import (
     roc_curve,
     root_mean_squared_error,
 )
+
 
 def roc_auc_ovr_scorer(estimator, X, y) -> float:
     """
@@ -45,6 +48,7 @@ def roc_auc_ovr_scorer(estimator, X, y) -> float:
         aucs.append(roc_auc_score(binary, proba[:, col]))
     return float(np.mean(aucs)) if aucs else 0.5
 
+
 REGRESSION_METRICS = ("RMSE", "MAE")
 CLASSIFICATION_METRICS = ("ROC-AUC (macro/OvR)", "F1-macro", "Balanced accuracy")
 
@@ -72,10 +76,7 @@ def regression_metrics(y_true, y_pred) -> dict:
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
-    return {
-        "RMSE": float(root_mean_squared_error(y_true, y_pred)),
-        "MAE": float(mean_absolute_error(y_true, y_pred))
-    }
+    return {"RMSE": float(root_mean_squared_error(y_true, y_pred)), "MAE": float(mean_absolute_error(y_true, y_pred))}
 
 
 def classification_metrics(y_true, y_pred, labels) -> dict:
@@ -94,13 +95,16 @@ def classification_metrics(y_true, y_pred, labels) -> dict:
     prec, rec, f1, support = precision_recall_fscore_support(
         y_true, y_pred, labels=labels, average=None, zero_division=0
     )
-    per_class = pd.DataFrame(
-        {"Precision": prec, "Recall": rec, "F1": f1, "Support": support}, index=labels
-    )
+    per_class = pd.DataFrame({"Precision": prec, "Recall": rec, "F1": f1, "Support": support}, index=labels)
     cm = confusion_matrix(y_true, y_pred, labels=labels)
+    with warnings.catch_warnings():
+        # A small chronological split can miss a predicted class entirely; sklearn
+        # warns and scores that class's recall as 0, which is the intended read.
+        warnings.filterwarnings("ignore", message="y_pred contains classes not in y_true")
+        balanced = float(balanced_accuracy_score(y_true, y_pred))
     return {
         "Accuracy": float(accuracy_score(y_true, y_pred)),
-        "Balanced accuracy": float(balanced_accuracy_score(y_true, y_pred)),
+        "Balanced accuracy": balanced,
         "F1-macro": float(f1_score(y_true, y_pred, labels=labels, average="macro", zero_division=0)),
         "per_class": per_class,
         "confusion": pd.DataFrame(cm, index=labels, columns=labels),
@@ -207,7 +211,7 @@ def predict_with_thresholds(y_proba, thresholds, labels) -> np.ndarray:
     """
     y_proba = np.asarray(y_proba, dtype=float)
     thr = np.array([max(thresholds.get(lab, 0.5), 1e-6) for lab in labels], dtype=float)
-    idx = np.argmax(y_proba / thr, axis=1) # scale to return one prediction for one sample only
+    idx = np.argmax(y_proba / thr, axis=1)  # scale to return one prediction for one sample only
     labels = np.asarray(labels)
     return labels[idx]
 
@@ -229,7 +233,7 @@ def roc_curve_data(y_true, y_proba, labels) -> dict:
     out = {}
     for j, lab in enumerate(labels):
         binary = (y_true == lab).astype(int)
-        if binary.sum() in (0, len(binary)): # cannot compute for either lab count = 0 or lab count = len(binary)
+        if binary.sum() in (0, len(binary)):  # cannot compute for either lab count = 0 or lab count = len(binary)
             continue
         fpr, tpr, thr = roc_curve(binary, y_proba[:, j])
         thr = np.minimum(thr, 1.0)  # sklearn sets thresholds[0] = inf; clamp so the hover reads 1.00
@@ -241,7 +245,8 @@ def roc_curve_data(y_true, y_proba, labels) -> dict:
         }
     return out
 
-def build_leaderboard(models, splits, task, labels=None, thresholds=None) -> pd.DataFrame:
+
+def build_leaderboard(models, splits, task, labels=None) -> pd.DataFrame:
     """
     Score every fitted model across the train/valid/test splits.
 
@@ -250,8 +255,6 @@ def build_leaderboard(models, splits, task, labels=None, thresholds=None) -> pd.
         splits (dict): Split name ('Train'/'Valid'/'Test') -> (X, y).
         task (str): 'regression' or 'classification'.
         labels (list | None): Ordered label set (classification only).
-        thresholds (dict | None): Per-class thresholds from `youden_thresholds`;
-            when given, classification predictions use them instead of argmax.
 
     Returns:
         pd.DataFrame: One row per model, columns '<Split> <Metric>', indexed by
@@ -266,16 +269,14 @@ def build_leaderboard(models, splits, task, labels=None, thresholds=None) -> pd.
                     row[f"{split_name} {metric}"] = value
             else:
                 proba = model.predict_proba(X)
-                if thresholds is not None:
-                    pred = predict_with_thresholds(proba, thresholds, labels)
-                else:
-                    pred = model.predict(X)
+                pred = model.predict(X)
                 metrics = classification_metrics(y, pred, labels)
                 row[f"{split_name} ROC-AUC (macro/OvR)"] = roc_auc_macro_ovr(y, proba, labels)
                 row[f"{split_name} F1-macro"] = metrics["F1-macro"]
                 row[f"{split_name} Balanced accuracy"] = metrics["Balanced accuracy"]
         records.append(row)
     return pd.DataFrame(records).set_index("Model")
+
 
 def naive_baseline_rows(splits, task, labels=None, momentum=None) -> pd.DataFrame:
     """
@@ -307,9 +308,7 @@ def naive_baseline_rows(splits, task, labels=None, momentum=None) -> pd.DataFram
     majority = pd.Series(splits["Train"][1]).mode().iloc[0]
     predictions = {"Baseline: majority class": lambda X, y: np.full(len(y), majority, dtype=float)}
     if momentum is not None:
-        predictions["Baseline: trailing momentum"] = (
-            lambda X, y: momentum.reindex(X.index).to_numpy(dtype=float)
-        )
+        predictions["Baseline: trailing momentum"] = lambda X, y: momentum.reindex(X.index).to_numpy(dtype=float)
     records = []
     for name, predict in predictions.items():
         row = {"Model": name}

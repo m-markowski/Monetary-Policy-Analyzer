@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
 import shap
+from config.settings import SEED
 from sklearn.inspection import partial_dependence, permutation_importance
 from sklearn.metrics import get_scorer
-from config.settings import SEED
 
 
 def final_estimator(model):
@@ -18,6 +18,7 @@ def final_estimator(model):
         The underlying fitted estimator (the Pipeline's 'model' step, or `model` itself).
     """
     return model.named_steps["model"] if hasattr(model, "named_steps") else model
+
 
 def selected_features(model, feature_names):
     """
@@ -54,6 +55,7 @@ def model_matrix(model, X):
     if not hasattr(model, "named_steps"):
         return X
     return model[:-1].transform(X)
+
 
 def is_tree_model(model) -> bool:
     """
@@ -214,9 +216,7 @@ def tree_shap(model, X, max_samples: int = 200, random_state: int = SEED) -> dic
     return {"shap_values": values, "features": features, "expected_value": explainer.expected_value}
 
 
-def partial_dependence_data(
-    model, X, feature: str, grid_resolution: int = 40, task: str | None = None
-) -> dict:
+def partial_dependence_data(model, X, feature: str, grid_resolution: int = 40, task: str | None = None) -> dict:
     """
     Partial dependence of the model on one feature, averaged over the sample.
 
@@ -234,7 +234,7 @@ def partial_dependence_data(
             fallback whether to average predict_proba (per class) or predict.
 
     Returns:
-        dict: 'grid' (feature values) and 'average' with shape (n_outputs, n_grid) —
+        dict: 'grid' (feature values) and 'average' with shape (n_outputs, n_grid) -
         one row per class for classification, one row for regression.
     """
     try:
@@ -293,6 +293,7 @@ def local_shap(model, X_row: pd.DataFrame) -> dict | None:
         return None
     features = pd.DataFrame(np.asarray(matrix), index=X_row.index, columns=names)
     return {"contributions": values, "expected_value": explainer.expected_value, "features": features}
+
 
 def shap_summary(shap_data: dict | None, class_index: int | None = None) -> pd.Series | None:
     """

@@ -4,7 +4,7 @@ import time
 import numpy as np
 import pandas as pd
 import streamlit as st
-from src.dataset_builder import ECONOMIES, cache_exists, master_mtime, load_master
+from src.dataset_builder import ECONOMIES, cache_exists, load_master, master_mtime
 from src.models import econometrics, ensemble, evaluate, explain, features, pipeline, registry, targets
 from src.models import neural as neural_mod
 from utils import interpret, plots
@@ -30,6 +30,7 @@ def get_monthly(economy: str, mtime: float) -> pd.DataFrame:
     """Month-end derived modelling view of the daily master (the single source of truth)."""
     return features.to_monthly(get_master(economy, mtime))
 
+
 @st.cache_data(show_spinner=False)
 def get_monthly_complete(economy: str, mtime: float) -> pd.DataFrame:
     """Monthly view with a partial final month dropped, for the forecast models."""
@@ -39,11 +40,13 @@ def get_monthly_complete(economy: str, mtime: float) -> pd.DataFrame:
         monthly = monthly.iloc[:-1]
     return monthly
 
+
 @st.cache_data(show_spinner=False)
 def arima_search(economy: str, series_col: str, mtime: float) -> dict | None:
     """Cached Box-Jenkins ARIMA order search for one monthly series."""
     series = get_monthly_complete(economy, mtime)[series_col].dropna()
     return econometrics.arima_order_search(series)
+
 
 @st.cache_data(show_spinner=False)
 def garch_search(economy: str, series_col: str, mtime: float) -> dict | None:
@@ -51,17 +54,20 @@ def garch_search(economy: str, series_col: str, mtime: float) -> dict | None:
     change = get_monthly_complete(economy, mtime)[series_col].diff().dropna()
     return econometrics.garch_order_search(change)
 
+
 @st.cache_data(show_spinner=False)
 def arima_accuracy(economy: str, series_col: str, order: tuple, seasonal_order: tuple, mtime: float) -> dict | None:
     """Cached holdout accuracy for one ARIMA specification on a monthly series."""
     series = get_monthly_complete(economy, mtime)[series_col].dropna()
     return econometrics.arima_backtest(series, order=order, seasonal_order=seasonal_order)
 
+
 @st.cache_data(show_spinner=False)
 def garch_accuracy(economy: str, series_col: str, order: tuple, mtime: float) -> dict | None:
     """Cached holdout volatility accuracy for one GARCH specification."""
     change = get_monthly_complete(economy, mtime)[series_col].diff().dropna()
     return econometrics.garch_backtest(change, p=order[0], q=order[1])
+
 
 def build_task_data(
     monthly: pd.DataFrame,
@@ -89,12 +95,14 @@ def build_task_data(
     data["target_column"] = target_column
     return data
 
+
 MACRO_RATE_COLUMNS = ("rate_unemployment", "rate_participation", "rate_savings", "rate_homeownership")
 ENGINEERED_SUFFIX = ("_ret_", "_ma_", "_vol_", "_chg_")
 
 # Lagged target levels observed at or before t. They are legitimate
 # autoregressive inputs for a forward-change target.
 TARGET_LAGS = (1, 3, 6)
+
 
 def group_of(feature: str, target_column: str | None = None) -> str:
     """Map a modelling feature (including engineered children) to a business block."""
@@ -108,9 +116,11 @@ def group_of(feature: str, target_column: str | None = None) -> str:
         return "Market"
     return "Macro"
 
+
 def is_base_feature(feature: str) -> bool:
     """True for base columns and engineered spreads; False for lags, returns, MAs and vols."""
     return not any(s in feature for s in ENGINEERED_SUFFIX) and "_lag" not in feature
+
 
 def significance_colour(p: float) -> str:
     """Green text for a coefficient significant at p < 0.05, red otherwise (for Styler.map)."""
@@ -118,16 +128,19 @@ def significance_colour(p: float) -> str:
         return ""
     return "color: #2ca02c" if p < 0.05 else "color: #d62728"
 
+
 def split_label(preset: str) -> str:
     """Human-readable train/dev/test percentages for a split-preset key."""
     train_frac, valid_frac = pipeline.SPLIT_PRESETS[preset]
     return f"{train_frac:.0%} train / {valid_frac:.0%} dev / {1 - train_frac - valid_frac:.0%} test"
+
 
 def format_param(value) -> str:
     """Compact display of one tuned hyperparameter (floats to 4 significant figures)."""
     if isinstance(value, float):
         return f"{value:.4g}"
     return str(value)
+
 
 def show_figure(fig, caption: str | None = None, caption_help: str | None = None) -> None:
     """Render a Plotly figure with an optional caption, skipping None figures."""
@@ -137,6 +150,7 @@ def show_figure(fig, caption: str | None = None, caption_help: str | None = None
     st.plotly_chart(fig, width="stretch")
     if caption:
         st.caption(caption, help=caption_help)
+
 
 def assemble_bundle(
     models,
@@ -168,7 +182,7 @@ def assemble_bundle(
     else:
         labels = None
         split_eval = splits
-    board = evaluate.build_leaderboard(models, split_eval, task, labels=labels, thresholds=None)
+    board = evaluate.build_leaderboard(models, split_eval, task, labels=labels)
     # Blend/Stack are fit on the dev split, so their dev score is in-sample and would
     # unfairly win a dev-based pick; the winner badge is chosen among base models only.
     selectable = board.drop(index=[n for n in ("Blend", "Stack") if n in board.index])
@@ -239,6 +253,7 @@ def save_bundle_artifacts(bundle: dict) -> None:
     )
     registry.save_artifacts(bundle["models"], meta, key)
 
+
 st.title("Modelling and prediction")
 
 if not cache_exists():
@@ -264,13 +279,9 @@ with tab_setup:
     if value_targets and st.session_state.get("mdl_val_target") not in value_targets:
         st.session_state["mdl_val_target"] = next(iter(value_targets))
 
-    st.caption(
-        "Training and diagnostics always use the full available data range for this economy. "
-    )
+    st.caption("Training and diagnostics always use the full available data range for this economy. ")
     cfg = st.columns([2, 3])
-    task_label = cfg[0].radio(
-        "Task", ["Direction (Hike/Hold/Cut)", "Value (regression)"], key="mdl_task"
-    )
+    task_label = cfg[0].radio("Task", ["Direction (Hike/Hold/Cut)", "Value (regression)"], key="mdl_task")
     task = "classification" if task_label.startswith("Direction") else "regression"
 
     spec = None
@@ -294,9 +305,7 @@ with tab_setup:
             cfg[1].caption(spec["purpose"])
 
     st.session_state.setdefault("mdl_horizon", 3)
-    horizon = st.slider(
-        "Prediction horizon (months ahead)", 1, 12, key="mdl_horizon", help=interpret.HORIZON_HELP
-    )
+    horizon = st.slider("Prediction horizon (months ahead)", 1, 12, key="mdl_horizon", help=interpret.HORIZON_HELP)
 
     st.markdown("**Split, scoring and search**")
     row = st.columns(3)
@@ -317,7 +326,9 @@ with tab_setup:
         key="mdl_metric",
         help=interpret.METRIC_HELP,
     )
-    budget = row[2].selectbox("Training budget", list(pipeline.BUDGET_TIERS), key="mdl_budget", help=interpret.BUDGET_HELP)
+    budget = row[2].selectbox(
+        "Training budget", list(pipeline.BUDGET_TIERS), key="mdl_budget", help=interpret.BUDGET_HELP
+    )
 
     st.session_state.setdefault("mdl_neural", False)
     include_neural = st.toggle(
@@ -373,11 +384,12 @@ with tab_setup:
         n_train = int(X.shape[0] * pipeline.SPLIT_PRESETS[split_preset][0])
         k_auto = pipeline.auto_k_features(n_train, X.shape[1])
         st.caption(
-            f"Not all {X.shape[1]} features reach a model: a univariate SelectKBest filter "
-            f"(F-test) keeps the {k_auto} most associated with the target. It is re-fit inside "
-            "every CV fold on that fold's training months only, so the selection itself cannot "
-            "leak, and k is sized to the smallest expanding fold (about 4 training rows per "
-            "kept feature)."
+            f"Not all {X.shape[1]} features reach a model. A one-feature-at-a-time F-test ranks them "
+            f"by their association with the target, and only the top {k_auto} are kept. During "
+            "cross-validation, selection is re-fit on each fold's training months only to avoid "
+            "leakage. The final pipeline re-fits it on the full training split; those selected "
+            "features are used on dev and test and listed in Diagnostics. k is limited by the "
+            "smallest expanding CV fold, at about 4 training rows per feature."
         )
 
 current_sig = (
@@ -466,6 +478,8 @@ with tab_train:
 
             def record_finished(name, cv_score, done):
                 now = time.perf_counter()
+                if cv_score is not None and metric in ("RMSE", "MAE"):
+                    cv_score = abs(cv_score)  # stored scores stay sign-aligned; display only
                 finished_rows.append(
                     {
                         "Model": name,
@@ -477,13 +491,10 @@ with tab_train:
                 last_finish["t"] = now
                 if done < total:
                     status.caption(
-                        f"Currently training {queue[done]}... ({done} of {total} done, "
-                        f"{total - done} remaining)"
+                        f"Currently training {queue[done]}... ({done} of {total} done, {total - done} remaining)"
                     )
                 progress_table.dataframe(
-                    pd.DataFrame(finished_rows)
-                    .set_index("Model")
-                    .style.format({f"CV {metric}": "{:.3f}"}, na_rep="-"),
+                    pd.DataFrame(finished_rows).set_index("Model").style.format({f"CV {metric}": "{:.3f}"}, na_rep="-"),
                     width="stretch",
                 )
 
@@ -514,6 +525,7 @@ with tab_train:
 
             neural_names = set()
             if include_neural:
+
                 def neural_progress(done, _total, name, _score):
                     record_finished(name, None, n_sklearn + done)
 
@@ -593,9 +605,7 @@ with tab_train:
                 )
 
             task_metrics = (
-                evaluate.CLASSIFICATION_METRICS
-                if bundle["task"] == "classification"
-                else evaluate.REGRESSION_METRICS
+                evaluate.CLASSIFICATION_METRICS if bundle["task"] == "classification" else evaluate.REGRESSION_METRICS
             )
             if best is not None:
                 st.success(
@@ -607,12 +617,7 @@ with tab_train:
                     st.caption(interpret.ROC_AUC_OVR_NOTE)
                 benchmark = None
                 if bundle["task"] == "regression" and metric in ("RMSE", "MAE"):
-                    y_test = np.asarray(bundle["splits"]["Test"][1], dtype=float)
-                    benchmark = (
-                        float(np.std(y_test))
-                        if metric == "RMSE"
-                        else float(np.mean(np.abs(y_test - y_test.mean())))
-                    )
+                    benchmark = board.loc["Baseline: no change", f"Test {metric}"]
                 verdict = interpret.metric_verdict(metric, board.loc[best, f"Test {metric}"], benchmark=benchmark)
                 if verdict:
                     st.caption(f"On the test set - {verdict}")
@@ -642,9 +647,7 @@ with tab_train:
             if ens_rows:
                 train_cols = [c for c in board_view.columns if c.startswith("Train")]
                 board_view.loc[ens_rows, train_cols] = np.nan
-            st.markdown(
-                f"**Full leaderboard** - sorted by the Dev {metric} column "
-            )
+            st.markdown(f"**Full leaderboard** - sorted by the Dev {metric} column ")
             st.dataframe(
                 board_view.style.format(precision=3, na_rep="-").apply(highlight_best, axis=1),
                 width="stretch",
@@ -655,11 +658,7 @@ with tab_train:
                 "cells are blanked: a train score for a dev-fit combiner is neither an in- nor an "
                 "out-of-sample read."
             )
-            st.caption(
-                interpret.BASELINE_HELP_REG
-                if bundle["task"] == "regression"
-                else interpret.BASELINE_HELP_CLF
-            )
+            st.caption(interpret.BASELINE_HELP_REG if bundle["task"] == "regression" else interpret.BASELINE_HELP_CLF)
 
             with st.expander("Model configuration (CV scores and chosen hyperparameters)"):
                 st.caption(interpret.CV_BUDGET_HELP)
@@ -668,10 +667,13 @@ with tab_train:
                 config_rows = []
                 for name, params in bundle["params"].items():
                     tuned = ", ".join(f"{k.replace('model__', '')}={format_param(v)}" for k, v in params.items())
+                    cv_score = bundle["cv_scores"].get(name)
+                    if cv_score is not None and metric in ("RMSE", "MAE"):
+                        cv_score = abs(cv_score)
                     config_rows.append(
                         {
                             "Model": name,
-                            f"CV {metric}": bundle["cv_scores"].get(name),
+                            f"CV {metric}": cv_score,
                             "Tuned hyperparameters": tuned or "-",
                         }
                     )
@@ -725,7 +727,10 @@ with tab_diag:
         diag_task = bundle["task"]
         model_names = list(bundle["models"])
         default_model = bundle["best"] if bundle["best"] in model_names else model_names[0]
-        if st.session_state.get("mdl_diag_model") not in model_names:
+        if st.session_state.get("mdl_diag_model_sig") != bundle["sig"]:
+            st.session_state["mdl_diag_model_sig"] = bundle["sig"]
+            st.session_state["mdl_diag_model"] = default_model
+        elif st.session_state.get("mdl_diag_model") not in model_names:
             st.session_state["mdl_diag_model"] = default_model
         model_name = st.selectbox("Model to inspect", model_names, key="mdl_diag_model")
         model = bundle["models"][model_name]
@@ -744,26 +749,13 @@ with tab_diag:
         )
         if eval_choice == "Train + Dev + Test":
             X_show = pd.concat([splits["Train"][0], X_valid, X_test])
-            y_show = np.concatenate(
-                [np.asarray(splits["Train"][1]), np.asarray(y_valid), np.asarray(y_test)]
-            )
+            y_show = np.concatenate([np.asarray(splits["Train"][1]), np.asarray(y_valid), np.asarray(y_test)])
         else:
             key_map = {"Test": "Test", "Dev": "Valid", "Train": "Train"}
             X_show, y_show = splits[key_map[eval_choice]]
-        use_youden = False
-        if diag_task == "classification":
-            st.session_state.setdefault("mdl_diag_youden", False)
-            use_youden = st.toggle(
-                "Tune the operating point with Youden's J on the dev split",
-                key="mdl_diag_youden",
-                help=interpret.THRESHOLD_HELP,
-            )
-        threshold_note = (
-            " - the Youden thresholds stay tuned on the dev split throughout" if use_youden else ""
-        )
-        st.caption(
-            f"The split control only changes which months the charts below are measured on{threshold_note}."
-        )
+        use_youden = diag_task == "classification" and st.session_state.setdefault("mdl_diag_youden", False)
+        threshold_note = " - the Youden thresholds stay tuned on the dev split throughout" if use_youden else ""
+        st.caption(f"The split control only changes which months the charts below are measured on{threshold_note}.")
 
         if diag_task == "classification":
             class_labels = list(bundle["classes"])
@@ -771,9 +763,7 @@ with tab_diag:
             proba_show = model.predict_proba(X_show)
             if use_youden:
                 y_valid_str = pd.Series(y_valid).astype(str).to_numpy()
-                thresholds = evaluate.youden_thresholds(
-                    y_valid_str, model.predict_proba(X_valid), class_labels
-                )
+                thresholds = evaluate.youden_thresholds(y_valid_str, model.predict_proba(X_valid), class_labels)
             else:
                 # Uniform thresholds make predict_with_thresholds a plain argmax - the
                 # same operating point the leaderboard scores use.
@@ -791,18 +781,31 @@ with tab_diag:
                 )
             with row1[1]:
                 matrix_slot = st.container()
-                st.session_state.setdefault("mdl_diag_cm_norm", False)
-                normalise = st.toggle(
-                    "Row-normalise (share of each actual class)",
-                    key="mdl_diag_cm_norm",
+                st.toggle(
+                    "Tune the operating point with Youden's J on the dev split",
+                    key="mdl_diag_youden",
+                    help=interpret.THRESHOLD_HELP,
                 )
                 with matrix_slot:
                     show_figure(
-                        plots.confusion_heatmap(metrics["confusion"], normalize=normalise),
+                        plots.confusion_heatmap(metrics["confusion"]),
                         interpret.confusion_verdict(metrics["confusion"]),
                         interpret.CONFUSION_HELP,
                     )
-            show_figure(plots.probability_histogram(proba_show, class_labels, y_true=y_show_str), interpret.PROB_HIST_HELP)
+            prob = evaluate.probability_metrics(y_show_str, proba_show, class_labels)
+            summary_cols = st.columns(3)
+            summary_cols[0].metric("Accuracy", f"{metrics['Accuracy']:.3f}")
+            summary_cols[1].metric("Log loss", "-" if prob["Log loss"] is None else f"{prob['Log loss']:.3f}")
+            summary_cols[2].metric("Brier (multiclass)", f"{prob['Brier']:.3f}")
+            st.dataframe(
+                metrics["per_class"].style.format({"Precision": "{:.2f}", "Recall": "{:.2f}", "F1": "{:.2f}"}),
+                width="stretch",
+            )
+            show_figure(
+                plots.probability_histogram(proba_show, class_labels, y_true=y_show_str),
+                "Predicted-probability distributions per class, on the selected months.",
+                interpret.PROB_HIST_HELP,
+            )
         else:
             pred_show = np.asarray(model.predict(X_show), dtype=float)
             y_show_arr = np.asarray(y_show, dtype=float)
@@ -824,12 +827,13 @@ with tab_diag:
             naive_mse = float(np.mean(y_show_arr**2))
             if naive_mse > 0:
                 skill = 1.0 - float(np.mean((y_show_arr - pred_show) ** 2)) / naive_mse
+                benchmark = float(np.sqrt(naive_mse))
             else:
-                skill = None
+                skill = benchmark = None
             st.caption(
                 f"Measured on the {eval_choice} months, in change space (the chart on the left is "
                 "reconstructed to levels for display only): "
-                + interpret.metric_verdict("RMSE", rmse, benchmark=float(np.std(y_show_arr)))
+                + interpret.metric_verdict("RMSE", rmse, benchmark=benchmark)
                 + " "
                 + interpret.skill_verdict(skill)
             )
@@ -848,6 +852,14 @@ with tab_diag:
                     perm_cache[model_name] = None
         perm = perm_cache[model_name]
         st.markdown("**Feature importance**")
+        kept = explain.selected_features(model, X_test.columns)
+        if len(kept) < X_test.shape[1]:
+            st.caption(
+                f"The fitted pipeline's filter kept {len(kept)} of the {X_test.shape[1]} candidate "
+                f"features for this model: {', '.join(sorted(kept))}. Only these reach the model, "
+                "so they are the features the measures below can meaningfully rank - a dropped "
+                "feature cannot move the predictions."
+            )
         st.caption(
             "Both charts ignore the split selector above. Permutation importance is always "
             "measured on the dev months: the model never fitted them, so the score drop from "
@@ -889,7 +901,9 @@ with tab_diag:
                 base_imp, lambda f: group_of(f, bundle["target_column"]), all_groups=blocks
             )
             show_figure(
-                plots.importance_bar(group_imp, title="Importance by business block", value_label="Group importance (0-100)"),
+                plots.importance_bar(
+                    group_imp, title="Importance by business block", value_label="Group importance (0-100)"
+                ),
                 interpret.group_importance_sentence(group_imp),
                 interpret.GROUP_IMPORTANCE_HELP,
             )
@@ -929,7 +943,7 @@ with tab_diag:
             local = explain.local_shap_series(model, X_row, class_index=class_ix)
             show_figure(
                 plots.shap_local_bar(local, title=f"Why the model predicted {chosen_month}"),
-                "Signed contributions for the selected month (green pushes the prediction up, red pulls it down)."
+                "Signed contributions for the selected month (green pushes the prediction up, red pulls it down).",
             )
         else:
             st.caption(
@@ -981,11 +995,7 @@ with tab_diag:
                 st.caption("Partial dependence is unavailable for this model.")
 
         st.markdown("**Econometric baseline**")
-        st.caption(
-            interpret.ECON_BASELINE_HELP_REG
-            if diag_task == "regression"
-            else interpret.ECON_BASELINE_HELP_CLF
-        )
+        st.caption(interpret.ECON_BASELINE_HELP_REG if diag_task == "regression" else interpret.ECON_BASELINE_HELP_CLF)
         st.caption(
             "The baseline is judged on the very months it was estimated from: it is "
             "fit once on the full monthly frame - including the months the ML models keep as dev and "
@@ -1012,9 +1022,7 @@ with tab_diag:
                     "significant, not on R2 alone."
                 )
                 st.dataframe(
-                    ols["coefficients"].style.format(precision=4).map(
-                        significance_colour, subset=["p-value"]
-                    ),
+                    ols["coefficients"].style.format(precision=4).map(significance_colour, subset=["p-value"]),
                     width="stretch",
                 )
                 st.caption("Green coefficients are significant at p < 0.05, red are not.")
@@ -1063,7 +1071,10 @@ with tab_scenario:
         X_full = bundle["X"]
         model_names = list(bundle["models"])
         default_model = bundle["best"] if bundle["best"] in model_names else model_names[0]
-        if st.session_state.get("mdl_scn_model") not in model_names:
+        if st.session_state.get("mdl_scn_model_sig") != bundle["sig"]:
+            st.session_state["mdl_scn_model_sig"] = bundle["sig"]
+            st.session_state["mdl_scn_model"] = default_model
+        elif st.session_state.get("mdl_scn_model") not in model_names:
             st.session_state["mdl_scn_model"] = default_model
         model_name = st.selectbox("Model", model_names, key="mdl_scn_model")
         model = bundle["models"][model_name]
@@ -1074,7 +1085,11 @@ with tab_scenario:
         target_month = anchor_month + pd.offsets.MonthEnd(bundle["horizon"])
 
         if scn_task == "classification":
-            seed_y = pd.Series(pd.Categorical(bundle["y"]).codes, index=bundle["y"].index).astype(float)
+            # Ordered Cut < Hold < Hike so correlation against the codes is meaningful.
+            seed_y = pd.Series(
+                pd.Categorical(bundle["y"], categories=["Cut", "Hold", "Hike"]).codes,
+                index=bundle["y"].index,
+            ).astype(float)
         else:
             seed_y = bundle["y"]
         # Only base columns and engineered spreads are offered as levers (same rule as
@@ -1087,7 +1102,7 @@ with tab_scenario:
         # Driver options and the anchor move with economy/task/target/horizon/data, not with
         # scoring or split choices; reset the controlled scenario widgets only when those change.
         scn_sig = (economy, task, target_name, horizon, mtime)
-        if st.session_state.get("mdl_scn_sig") != scn_sig:
+        if st.session_state.get("mdl_scn_sig") != scn_sig or "mdl_scn_drivers" not in st.session_state:
             st.session_state["mdl_scn_sig"] = scn_sig
             st.session_state["mdl_scn_drivers"] = default_drivers
             for col in driver_options:
@@ -1138,9 +1153,7 @@ with tab_scenario:
                     "between; Hold means it stays inside that band."
                 )
                 show_figure(
-                    plots.class_probability_bar(
-                        pd.Series(proba, index=class_labels), title="Class probabilities"
-                    ),
+                    plots.class_probability_bar(pd.Series(proba, index=class_labels), title="Class probabilities"),
                     "Probability the model assigns to each forward decision under the scenario.",
                 )
             else:
@@ -1278,7 +1291,9 @@ with tab_forecast:
                     f"{acc['train_rmse']:,.3f} / {acc['train_mae']:,.3f}."
                 )
             fc_index = pd.date_range(series.index[-1] + pd.offsets.MonthEnd(1), periods=steps, freq="ME")
-            fc = {k: pd.Series(np.asarray(v), index=fc_index) for k, v in econometrics.arima_forecast(res, steps).items()}
+            fc = {
+                k: pd.Series(np.asarray(v), index=fc_index) for k, v in econometrics.arima_forecast(res, steps).items()
+            }
             show_figure(
                 plots.forecast_fan(series.iloc[-120:], fc, name=series_col),
                 "History is truncated to the last 120 months for readability; the dashed line is the "
@@ -1293,9 +1308,7 @@ with tab_forecast:
         st.caption(interpret.GARCH_HELP)
         if st.session_state.get("mdl_fc_garch_series") not in series_options:
             st.session_state["mdl_fc_garch_series"] = series_options[default_series]
-        garch_col = st.selectbox(
-            "Series (its monthly change is modelled)", series_options, key="mdl_fc_garch_series"
-        )
+        garch_col = st.selectbox("Series (its monthly change is modelled)", series_options, key="mdl_fc_garch_series")
         change = monthly_fc[garch_col].diff().dropna()
         gsearch = garch_search(economy, garch_col, mtime)
         if gsearch is None:

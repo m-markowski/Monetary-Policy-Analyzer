@@ -165,7 +165,7 @@ def probability_plot(series: pd.Series, kind: str = "qq", title: str | None = No
 
     fig.update_layout(
         template=TEMPLATE,
-        title=title or f"{kind.upper()} plot — {name}",
+        title=title or f"{kind.upper()} plot - {name}",
         xaxis_title=x_title,
         yaxis_title=y_title,
     )
@@ -232,7 +232,7 @@ def box_or_violin(
 
     fig.update_layout(
         template=TEMPLATE,
-        title=title or f"{kind.capitalize()} — {name}",
+        title=title or f"{kind.capitalize()} - {name}",
         yaxis_title="",
         xaxis_title="",
         showlegend=groups is not None,
@@ -372,7 +372,7 @@ def category_counts(
         )
         fig.update_layout(xaxis_title=name, yaxis_title="Count")
 
-    fig.update_layout(template=TEMPLATE, title=title or f"Counts — {name}")
+    fig.update_layout(template=TEMPLATE, title=title or f"Counts - {name}")
     return fig
 
 
@@ -488,7 +488,7 @@ def matrix_heatmap(
         heat.update(
             text=np.round(matrix.to_numpy(), 2),
             texttemplate="%{text}",
-            textfont=dict(size=12.5, color="black"),
+            textfont={"size": 12.5, "color": "black"},
         )
 
     fig = go.Figure(heat)
@@ -516,7 +516,7 @@ def compare_lines(
         columns (list[str]): Up to four column names to plot.
         title (str | None): Figure title.
         zero_line (bool): Draw a dashed zero reference line on every panel.
-        opacity (float): Line opacity (0–1).
+        opacity (float): Line opacity (0-1).
 
     Returns:
         go.Figure | None: The figure, or None if no valid columns are found.
@@ -536,11 +536,11 @@ def compare_lines(
             fig.add_hline(y=0, line_dash="dot", line_color="rgba(0,0,0,0.25)")
         fig.update_layout(
             template=TEMPLATE,
-            title=dict(
-                text=cols[0] if not title else title,
-                x=0.5,
-                xanchor="center",
-            ),
+            title={
+                "text": cols[0] if not title else title,
+                "x": 0.5,
+                "xanchor": "center",
+            },
             hovermode="x unified",
         )
     else:
@@ -686,11 +686,11 @@ def levels_with_overlay(
 
     fig.update_xaxes(showgrid=True, gridwidth=0.5, griddash="dash")
 
-    layout_kwargs = dict(
-        template=TEMPLATE,
-        title=title,
-        hovermode="x unified",
-    )
+    layout_kwargs = {
+        "template": TEMPLATE,
+        "title": title,
+        "hovermode": "x unified",
+    }
     if n > 1:
         layout_kwargs["height"] = 280 + 180 * (n - 1)
 
@@ -860,6 +860,7 @@ def projection_scatter(
     fig.update_layout(template=TEMPLATE, title=title, legend_title_text="")
     return fig
 
+
 def roc_curves(curves: dict, title: str | None = None) -> go.Figure | None:
     """
     Per-class one-vs-rest ROC curves with a chance diagonal.
@@ -903,15 +904,13 @@ def roc_curves(curves: dict, title: str | None = None) -> go.Figure | None:
     )
     return fig
 
-def confusion_heatmap(
-    cm: pd.DataFrame | None, normalize: bool = False, title: str | None = None
-) -> go.Figure | None:
+
+def confusion_heatmap(cm: pd.DataFrame | None, title: str | None = None) -> go.Figure | None:
     """
-    Confusion matrix as an annotated heatmap (rows = actual, columns = predicted).
+    Confusion matrix of raw counts as an annotated heatmap (rows = actual, columns = predicted).
 
     Args:
         cm (pd.DataFrame | None): Confusion matrix from `classification_metrics`.
-        normalize (bool): Show per-row shares instead of raw counts.
         title (str | None): Figure title.
 
     Returns:
@@ -919,23 +918,16 @@ def confusion_heatmap(
     """
     if cm is None or cm.empty:
         return None
-    z = cm.to_numpy(dtype=float)
-    if normalize:
-        row = z.sum(axis=1, keepdims=True)
-        z = np.divide(z, row, out=np.zeros_like(z), where=row > 0)
-    text = np.round(z, 2) if normalize else cm.to_numpy()
-    fmt = ":.2f" if normalize else ""
-    value_label = "Share" if normalize else "Count"
     heat = go.Heatmap(
-        z=z,
+        z=cm.to_numpy(dtype=float),
         x=cm.columns.astype(str),
         y=cm.index.astype(str),
         colorscale=[[0.0, "#f5f5f5"], [1.0, "#FF4B4B"]],
-        colorbar={"title": value_label},
-        text=text,
+        colorbar={"title": "Count"},
+        text=cm.to_numpy(),
         texttemplate="%{text}",
         textfont={"size": 12.5, "color": "black"},
-        hovertemplate=f"Actual: %{{y}}<br>Predicted: %{{x}}<br>{value_label}: %{{z{fmt}}}<extra></extra>",
+        hovertemplate="Actual: %{y}<br>Predicted: %{x}<br>Count: %{z}<extra></extra>",
     )
     fig = go.Figure(heat)
     fig.update_layout(
@@ -983,6 +975,7 @@ def importance_bar(
     )
     fig.update_layout(template=TEMPLATE, title=title or "", xaxis_title=value_label, yaxis_title="")
     return fig
+
 
 def class_probability_bar(proba: pd.Series | None, title: str | None = None) -> go.Figure | None:
     """
@@ -1048,9 +1041,7 @@ def probability_histogram(
     if y_proba.size == 0:
         return None
     n = len(labels)
-    fig = make_subplots(
-        rows=1, cols=n, shared_yaxes=True, subplot_titles=[f"P({lab})" for lab in labels]
-    )
+    fig = make_subplots(rows=1, cols=n, shared_yaxes=True, subplot_titles=[f"P({lab})" for lab in labels])
     y_true = np.asarray(y_true) if y_true is not None else None
     xbins = {"start": 0.0, "end": 1.0, "size": 1.0 / bins}
     for j, lab in enumerate(labels):
@@ -1098,6 +1089,7 @@ def probability_histogram(
     fig.update_yaxes(title_text="Count", col=1)
     return fig
 
+
 def predicted_vs_actual(y_true, y_pred, index=None, title: str | None = None) -> go.Figure | None:
     """
     Actual vs predicted values over the sample (a path for the monthly frame).
@@ -1120,9 +1112,7 @@ def predicted_vs_actual(y_true, y_pred, index=None, title: str | None = None) ->
     mode = "lines+markers" if y_true.size <= 60 else "lines"
     fig = go.Figure()
     fig.add_scatter(x=x, y=y_true, mode=mode, name="Actual", line={"color": "#1f77b4"})
-    fig.add_scatter(
-        x=x, y=y_pred, mode=mode, name="Predicted", line={"color": "#d62728", "dash": "dash"}
-    )
+    fig.add_scatter(x=x, y=y_pred, mode=mode, name="Predicted", line={"color": "#d62728", "dash": "dash"})
     fig.update_layout(template=TEMPLATE, title=title or "Predicted vs actual", yaxis_title="")
     fig.update_traces(yhoverformat=".2f")
     return fig
@@ -1148,11 +1138,10 @@ def residual_plot(y_true, y_pred, index=None, title: str | None = None) -> go.Fi
     fig = go.Figure()
     fig.add_scatter(x=x, y=resid, mode="markers", name="Residual", marker={"color": "#4c78a8"})
     fig.add_hline(y=0, line_dash="dash", line_color="rgba(0,0,0,0.4)")
-    fig.update_layout(
-        template=TEMPLATE, title=title or "Residuals (actual - predicted)", yaxis_title="Residual"
-    )
+    fig.update_layout(template=TEMPLATE, title=title or "Residuals (actual - predicted)", yaxis_title="Residual")
     fig.update_traces(yhoverformat=".2f")
     return fig
+
 
 def cooks_distance_plot(cooks: pd.Series | None, threshold: float, title: str | None = None) -> go.Figure | None:
     """
@@ -1231,9 +1220,7 @@ def forecast_fan(
         name="Confidence interval",
         hoverinfo="skip",
     )
-    fig.add_scatter(
-        x=mean_x, y=mean_y, mode="lines", name="Forecast", line={"color": "#d62728", "dash": "dash"}
-    )
+    fig.add_scatter(x=mean_x, y=mean_y, mode="lines", name="Forecast", line={"color": "#d62728", "dash": "dash"})
     fig.update_layout(template=TEMPLATE, title=title or f"Forecast - {name}", yaxis_title="")
     fig.update_traces(yhoverformat=".2f")
     return fig
@@ -1277,7 +1264,10 @@ def acf_pacf_plot(data: dict | None, title: str | None = None) -> go.Figure | No
 
 
 def garch_volatility_plot(
-    forecast: dict | None, forecast_index=None, title: str | None = None, markers: bool = False,
+    forecast: dict | None,
+    forecast_index=None,
+    title: str | None = None,
+    markers: bool = False,
 ) -> go.Figure | None:
     """
     In-sample conditional volatility with an optional forecast continuation.
@@ -1316,6 +1306,7 @@ def garch_volatility_plot(
     fig.update_layout(template=TEMPLATE, title=title or "Conditional volatility (GARCH)", yaxis_title="Volatility")
     fig.update_traces(yhoverformat=".3f")
     return fig
+
 
 def shap_local_bar(contributions: pd.Series | None, top_n: int = 12, title: str | None = None) -> go.Figure | None:
     """

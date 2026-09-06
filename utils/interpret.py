@@ -1,7 +1,7 @@
 import pandas as pd
 
 SKEW_HELP = (
-    "Sample skew rule of thumb: |skew| < 0.5 ≈ symmetric, 0.5–1 moderate, > 1 strong. "
+    "Sample skew rule of thumb: |skew| < 0.5 ≈ symmetric, 0.5-1 moderate, > 1 strong. "
     "Sign gives direction: positive = long right tail, negative = long left tail."
 )
 
@@ -22,13 +22,13 @@ MEAN_CI_HELP = (
 NORMALITY_GUIDE = (
     "Each test asks the same question: *could this data plausibly come from a normal "
     "(bell-curve) distribution?*\n\n"
-    "- **p-value** — the chance of seeing data this far from normal if it really were "
+    "- **p-value** - the chance of seeing data this far from normal if it really were "
     "normal. Small p = strong evidence *against* normality.\n"
-    "- **normal? (α)** — 'Yes' when p ≥ α (cannot rule out normal), 'No' when p < α "
+    "- **normal? (α)** - 'Yes' when p ≥ α (cannot rule out normal), 'No' when p < α "
     "(reject normal).\n"
-    "- **Anderson–Darling** reports no p-value by design; its verdict compares the "
+    "- **Anderson-Darling** reports no p-value by design; its verdict compares the "
     "statistic to a critical value at α (smaller statistic = closer to normal).\n"
-    "- **Shapiro–Wilk** is shown only for samples ≤ 5000; beyond that its p-value is "
+    "- **Shapiro-Wilk** is shown only for samples ≤ 5000; beyond that its p-value is "
     "unreliable, so it is skipped.\n\n"
     "*Caveat for this data:* these tests gain power with sample size. On the full daily "
     "series (Collapse to monthly off) the huge, forward-filled sample flags tiny, harmless "
@@ -39,7 +39,7 @@ NORMALITY_GUIDE = (
     "*Note on time-series data:* even first-difference and return series can show "
     "volatility clustering (large moves following large moves), which violates the "
     "independence assumption. The tests remain useful diagnostics but treat the output "
-    "as approximate. "
+    "as approximate."
 )
 
 REGIME_AVAILABILITY_HELP = (
@@ -79,7 +79,7 @@ VIF_HELP = (
 
 GROUP_TEST_GUIDE = (
     "This checks whether a feature has a different typical value from one regime to another.\n\n"
-    "- **Typical value** - the average unless the data is skewed or has outliers the "
+    "- **Typical value** - the average; when the data is skewed or has outliers the "
     "test switches to the median, a more robust middle value.\n"
     "- **Which test is used (picked automatically):**\n"
     "    - It first checks whether each regime's values are roughly normally distributed and whether "
@@ -88,7 +88,7 @@ GROUP_TEST_GUIDE = (
     "    - If no -> a rank-based **Mann-Whitney** (two regimes) or **Kruskal-Wallis** (three "
     "or more), which need no such assumptions.\n"
     "- **p-value** - the chance of seeing a difference this big if the regimes were truly "
-    "identical. **p-value** less than α means the difference is unlikely to be sole luck.\n"
+    "identical. **p-value** less than α means the difference is unlikely to be chance alone.\n"
     "- **Reality check:** these tests grow over-sensitive as the sample grows - on the full "
     "daily series (Collapse to monthly off) they flag even trivial gaps, and monthly "
     "sampling eases but does not remove this. Always compare against the box/violin - if the "
@@ -118,7 +118,7 @@ ASSOCIATION_GUIDE = (
     "the other; 'linked' means some combinations happen far more (or less) often than chance "
     "alone would produce.\n"
     "- **p-value** - the chance of seeing a pattern this strong if the two were truly "
-    "unrelated. Below the α = they are linked.\n"
+    "unrelated. Below α they count as linked.\n"
     "- **Cramér's V** - rescales the result to a 0-1 strength score, comparable across "
     "tables: 0 = unrelated, 1 = one regime perfectly predicts the other. Rule of thumb: "
     "under 0.1 negligible, 0.1-0.3 weak, 0.3-0.5 moderate, above 0.5 strong.\n"
@@ -197,10 +197,7 @@ SPLIT_HELP = (
     "- kept separate so none of those choices peeks at the test set. Presets keep dev and test roughly equal in size."
 )
 
-CV_HELP = (
-    "Cross-validation uses `TimeSeriesSplit`: each fold trains on the past and validates on the next "
-    "block."
-)
+CV_HELP = "Cross-validation uses `TimeSeriesSplit`: each fold trains on the past and validates on the next block."
 
 BUDGET_HELP = (
     "The training budget controls how hard the search for good hyperparameters works. Fast and "
@@ -276,9 +273,7 @@ NEURAL_HELP = (
 CV_BUDGET_HELP = (
     "Hyperparameters are searched with cross-validation on the training split only, in time order "
     "(`TimeSeriesSplit`). Fast and Balanced use a randomised search (15 and 40 settings); Thorough "
-    "uses Optuna (60 guided trials). The CV score is the mean fold score in the chosen metric; for "
-    "the error metrics (RMSE, MAE) it is shown negated - sklearn's sign-aligned convention, so a "
-    "higher CV score is always better."
+    "uses Optuna (60 guided trials). The CV score is the mean fold score in the chosen metric."
 )
 
 CV_ROC_AUC_NOTE = (
@@ -335,8 +330,7 @@ ROC_HELP = (
 
 CONFUSION_HELP = (
     "The confusion matrix cross-tabulates actual (rows) against predicted (columns) classes. The "
-    "diagonal is correct predictions; off-diagonal cells show what gets confused with what. Normalise "
-    "by row to read it as 'of the actual X, what share did we predict as each class'."
+    "diagonal is correct predictions; off-diagonal cells show what gets confused with what."
 )
 
 IMPORTANCE_HELP = (
@@ -441,6 +435,7 @@ GARCH_HELP = (
     "size of the swings rather than their direction. The chart reads as how large a typical monthly "
     "move is, month by month, and how large the model expects it to be ahead."
 )
+
 
 def scatter_ols_verdict(r: float) -> str:
     """
@@ -764,6 +759,7 @@ def regime_guide(economy: str) -> str:
         )
     return text
 
+
 def best_model_sentence(name: str, metric: str, dev_score: float | None, test_score: float | None) -> str:
     """One-line announcement of the winner: picked on the dev split, reported on test."""
     picked = f"Best model: {name} - picked for the best Dev {metric}"
@@ -796,6 +792,7 @@ def overfit_note(train_score: float | None, test_score: float | None, metric: st
         return head + "a moderate gap; some overfitting, read the test column as the honest score."
     return head + "train and test are close, so generalisation looks stable."
 
+
 def metric_verdict(metric: str, value: float | None, benchmark: float | None = None, unit: str = "") -> str:
     """
     Band reading of one leaderboard metric value, keyed by its display name.
@@ -803,15 +800,13 @@ def metric_verdict(metric: str, value: float | None, benchmark: float | None = N
     Covers the curated metric set (`evaluate.REGRESSION_METRICS` /
     `evaluate.CLASSIFICATION_METRICS`). RMSE and MAE have no absolute scale, so
     they are read in the target's own units and, when `benchmark` is given,
-    against the score a constant mean prediction would get in the same metric
-    (the target's standard deviation for RMSE, its mean absolute deviation for
-    MAE).
+    against the same-metric score of the leaderboard's no-change baseline.
 
     Args:
         metric (str): Display metric name, e.g. 'RMSE' or 'ROC-AUC (macro/OvR)'.
         value (float | None): The metric value to interpret.
-        benchmark (float | None): Same-metric score of a constant mean
-            prediction, enabling the RMSE/MAE relative reading.
+        benchmark (float | None): Same-metric score of the no-change (zero
+            forward change) baseline, enabling the RMSE/MAE relative reading.
         unit (str): Unit label appended to RMSE/MAE values (e.g. 'pp').
 
     Returns:
@@ -867,14 +862,14 @@ def metric_verdict(metric: str, value: float | None, benchmark: float | None = N
             return head
         ratio = value / benchmark
         if ratio >= 1:
-            tail = "no better than guessing the average"
+            tail = "no better than that baseline"
         elif ratio >= 0.8:
-            tail = "a modest improvement on guessing the average"
+            tail = "a modest improvement on it"
         elif ratio >= 0.5:
-            tail = "a solid improvement on guessing the average"
+            tail = "a solid improvement on it"
         else:
-            tail = "a large improvement on guessing the average"
-        return f"{head} A constant mean prediction would score {format_number(benchmark)}{u}, so this is {tail}."
+            tail = "a large improvement on it"
+        return f"{head} Predicting no change at all would score {format_number(benchmark)}{u}, so this is {tail}."
     return ""
 
 
@@ -893,8 +888,7 @@ def skill_verdict(skill: float | None, naive_name: str = "the no-change baseline
         return ""
     if skill <= 0:
         return (
-            f"Skill {skill:+.2f}: no better than {naive_name} - the model adds nothing over assuming "
-            "nothing changes."
+            f"Skill {skill:+.2f}: no better than {naive_name} - the model adds nothing over assuming nothing changes."
         )
     if skill < 0.1:
         band = "a marginal edge over"
@@ -917,6 +911,7 @@ def roc_auc_verdict(auc: float | None, split: str | None = None) -> str:
         "the average of the per-class one-vs-rest AUCs shown in the ROC-curve legend below."
     )
 
+
 def confusion_verdict(cm) -> str:
     """Plain reading of a confusion matrix: overall hit rate and the biggest confusion."""
     if cm is None or getattr(cm, "empty", True):
@@ -937,6 +932,7 @@ def confusion_verdict(cm) -> str:
             f"{actual} ({worst:.0f} months)."
         )
     return note
+
 
 def residual_verdict(y_true, y_pred) -> str:
     """Plain reading of regression residuals: systematic bias and leftover autocorrelation."""
@@ -959,11 +955,9 @@ def residual_verdict(y_true, y_pred) -> str:
             "unpredictable noise)"
         )
     if not parts:
-        return (
-            "Residuals scatter around zero with no strong pattern, which is what a well-specified "
-            "model looks like."
-        )
+        return "Residuals scatter around zero with no strong pattern, which is what a well-specified model looks like."
     return "The residuals show " + " and ".join(parts) + "."
+
 
 def class_balance_note(y) -> str:
     """Report the class distribution and flag imbalance."""
@@ -1014,6 +1008,7 @@ def stationarity_verdict(res: dict | None, name: str) -> str:
         "AR and MA parts are fit."
     )
 
+
 def target_change_note(res: dict | None, name: str) -> str:
     """
     Stationarity reading for the forward-change regression target.
@@ -1044,6 +1039,7 @@ def target_change_note(res: dict | None, name: str) -> str:
         "here, so judge the fit on the held-out test score."
     )
 
+
 def ljung_box_verdict(diag: dict, alpha: float = 0.05) -> str:
     """Reading of the Ljung-Box residual white-noise check from `arima_diagnostics`."""
     p = format_pvalue(diag["ljung_box_p"])
@@ -1054,6 +1050,7 @@ def ljung_box_verdict(diag: dict, alpha: float = 0.05) -> str:
         "not capture - even the best candidate can fail this check on a stubborn series, so treat the "
         "forecast interval as approximate."
     )
+
 
 def garch_persistence_note(persistence: float) -> str:
     """Explain the shape of the volatility forecast from the estimated GARCH persistence."""
@@ -1068,6 +1065,7 @@ def garch_persistence_note(persistence: float) -> str:
         "month, so the forecast reverts toward the series' long-run volatility over the horizon."
     )
 
+
 def ols_assumptions_note(ols: dict) -> str:
     """Plain reading of the OLS residual diagnostics (Durbin-Watson, Jarque-Bera, condition number)."""
     dw = ols["durbin_watson"]
@@ -1078,9 +1076,7 @@ def ols_assumptions_note(ols: dict) -> str:
     else:
         dw_read = f"Durbin-Watson {dw:.2f} is near 2, so little residual autocorrelation"
     jb_read = (
-        "residuals depart from normality"
-        if ols["jarque_bera_p"] < 0.05
-        else "residuals are consistent with normality"
+        "residuals depart from normality" if ols["jarque_bera_p"] < 0.05 else "residuals are consistent with normality"
     )
     cond = ols["condition_number"]
     if cond < 30:
@@ -1103,5 +1099,5 @@ def ols_assumptions_note(ols: dict) -> str:
         )
     return (
         f"{dw_read}; {jb_read} (JB p = {format_pvalue(ols['jarque_bera_p'])}); {cond_read} "
-        f"Rule of thumb: below 30 fine, 30-100 moderate, above 100 problematic)."
+        f"Rule of thumb: below 30 fine, 30-100 moderate, above 100 problematic."
     )

@@ -1,12 +1,15 @@
+import warnings
+
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 from arch import arch_model
 from scipy.stats import norm
 from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.stats.stattools import durbin_watson, jarque_bera
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.stattools import acf, adfuller, pacf
-import statsmodels.api as sm
-from statsmodels.stats.stattools import durbin_watson, jarque_bera
 
 
 def stationarity(series: pd.Series, regression: str = "c") -> dict | None:
@@ -80,7 +83,14 @@ def fit_arima(series: pd.Series, order=(1, 0, 0), seasonal_order=(0, 0, 0, 0)):
     if len(values) < 20:
         return None
     try:
-        return ARIMA(values, order=order, seasonal_order=seasonal_order).fit()
+        with warnings.catch_warnings():
+            # The order search fits many deliberately bad candidates; their expected
+            # non-stationary/non-invertible start-parameter and MLE convergence
+            # warnings would flood the terminal without changing any result.
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            warnings.filterwarnings("ignore", message="Non-stationary starting autoregressive")
+            warnings.filterwarnings("ignore", message="Non-invertible starting MA")
+            return ARIMA(values, order=order, seasonal_order=seasonal_order).fit()
     except (ValueError, np.linalg.LinAlgError):
         return None
 
@@ -138,8 +148,8 @@ def fit_garch(series: pd.Series, p: int = 1, q: int = 1, dist: str = "t"):
 
     Args:
         series (pd.Series): Return or change series (roughly zero-mean).
-        p (int): GARCH lag order (variance).
-        q (int): ARCH lag order (squared residuals).
+        p (int): ARCH lag order (squared residuals).
+        q (int): GARCH lag order (variance).
         dist (str): Innovation distribution ('t' captures fat tails; 'normal' also ok).
 
     Returns:
@@ -179,6 +189,7 @@ def garch_forecast(result, steps: int = 12) -> dict:
         "persistence": persistence,
     }
 
+
 def arima_candidate(values: pd.Series, order: tuple, seasonal_order: tuple) -> dict | None:
     """
     Fit one ARIMA/SARIMA candidate and summarise it for the order-search leaderboard.
@@ -192,9 +203,8 @@ def arima_candidate(values: pd.Series, order: tuple, seasonal_order: tuple) -> d
         dict | None: 'Order', 'Seasonal', 'AIC', 'BIC' and 'Ljung-Box p', or None
         if the fit fails.
     """
-    try:
-        res = ARIMA(values, order=order, seasonal_order=seasonal_order).fit()
-    except (ValueError, np.linalg.LinAlgError):
+    res = fit_arima(values, order=order, seasonal_order=seasonal_order)
+    if res is None:
         return None
     resid = pd.Series(res.resid).dropna()
     try:
@@ -279,8 +289,8 @@ def garch_order_search(
 
     Args:
         series (pd.Series): Return or change series (roughly zero-mean).
-        max_p (int): Largest GARCH (variance) lag to try.
-        max_q (int): Largest ARCH (squared-residual) lag to try.
+        max_p (int): Largest ARCH (squared-residual) lag to try.
+        max_q (int): Largest GARCH (variance) lag to try.
         dist (str): Innovation distribution passed to `arch_model`.
         ic (str): Ranking criterion ('aic' or 'bic').
         top (int): Number of candidate orders to keep in the leaderboard.
@@ -296,7 +306,9 @@ def garch_order_search(
     for p in range(1, max_p + 1):
         for q in range(1, max_q + 1):
             try:
-                res = arch_model(values, mean="Constant", vol="GARCH", p=p, q=q, dist=dist, rescale=True).fit(disp="off")
+                res = arch_model(values, mean="Constant", vol="GARCH", p=p, q=q, dist=dist, rescale=True).fit(
+                    disp="off"
+                )
             except (ValueError, np.linalg.LinAlgError):
                 continue
             rows.append({"Order": (p, q), "AIC": float(res.aic), "BIC": float(res.bic)})
@@ -304,6 +316,7 @@ def garch_order_search(
         return None
     leaderboard = pd.DataFrame(rows).sort_values(ic.upper()).reset_index(drop=True)
     return {"best": leaderboard.loc[0, "Order"], "ic": ic, "leaderboard": leaderboard.head(top)}
+
 
 def arima_backtest(series: pd.Series, order=(1, 0, 0), seasonal_order=(0, 0, 0, 0), holdout: int = 12) -> dict | None:
     """
@@ -328,9 +341,8 @@ def arima_backtest(series: pd.Series, order=(1, 0, 0), seasonal_order=(0, 0, 0, 
     if len(values) - holdout < 20:
         return None
     train, test = values.iloc[:-holdout], values.iloc[-holdout:]
-    try:
-        res = ARIMA(train, order=order, seasonal_order=seasonal_order).fit()
-    except (ValueError, np.linalg.LinAlgError):
+    res = fit_arima(train, order=order, seasonal_order=seasonal_order)
+    if res is None:
         return None
     errors = test.to_numpy() - np.asarray(res.get_forecast(steps=holdout).predicted_mean)
     resid = np.asarray(res.resid)
@@ -353,8 +365,8 @@ def garch_backtest(series: pd.Series, p: int = 1, q: int = 1, dist: str = "t", h
 
     Args:
         series (pd.Series): Return or change series (roughly zero-mean).
-        p (int): GARCH lag order (variance).
-        q (int): ARCH lag order (squared residuals).
+        p (int): ARCH lag order (squared residuals).
+        q (int): GARCH lag order (variance).
         dist (str): Innovation distribution passed to `arch_model`.
         holdout (int): Number of trailing observations held out and forecast.
 
@@ -379,6 +391,7 @@ def garch_backtest(series: pd.Series, p: int = 1, q: int = 1, dist: str = "t", h
         "rmse": float(np.sqrt(np.mean(errors**2))),
         "mae": float(np.mean(np.abs(errors))),
     }
+
 
 def top_correlated_features(X: pd.DataFrame, target: pd.Series, k: int) -> list[str]:
     """
