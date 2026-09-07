@@ -372,6 +372,16 @@ with tab_setup:
             f"months in the data resulting in {n_months - lag_cost - horizon} usable rows."
             + (f" A further {row_gap} month(s) drop out for missing feature values." if row_gap > 0 else "")
         )
+
+        n_train = int(X.shape[0] * pipeline.SPLIT_PRESETS[split_preset][0]) - horizon
+        k_auto = pipeline.auto_k_features(n_train, X.shape[1])
+        st.caption(
+            f"Each row's outcome is only known {horizon} month(s) later, so the last {horizon} training "
+            "row(s) before the dev split and the last dev row(s) before the test split are dropped: their "
+            "labels would otherwise already contain the next split's outcomes. The same gap separates the "
+            "training and validation blocks inside cross-validation."
+        )
+        
         if task == "classification":
             st.caption(interpret.class_balance_note(y))
             st.caption(
@@ -388,16 +398,6 @@ with tab_setup:
             "deliberately - they are observed before the prediction is made, so they are honest "
             "autoregressive features, not leakage.",
             help=interpret.LEAKAGE_HELP,
-        )
-
-        n_train = int(X.shape[0] * pipeline.SPLIT_PRESETS[split_preset][0]) - horizon
-        k_auto = pipeline.auto_k_features(n_train, X.shape[1])
-        st.caption(
-            f"Each row's outcome is only known {horizon} month(s) later, so the last {horizon} training "
-            "row(s) before the dev split and the last dev row(s) before the test split are dropped: their "
-            "labels would otherwise already contain the next split's outcomes. The same gap separates the "
-            "training and validation blocks inside cross-validation.",
-            help=interpret.SPLIT_HELP,
         )
         st.caption(
             f"Not all {X.shape[1]} features reach a model. A one-feature-at-a-time F-test ranks them "
