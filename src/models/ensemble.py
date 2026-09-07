@@ -1,7 +1,8 @@
 import numpy as np
-from config.settings import SEED
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import log_loss, root_mean_squared_error
+
+from config.settings import SEED
 
 
 def stack_meta_features(models: dict, X, task: str) -> np.ndarray:
@@ -133,19 +134,21 @@ def build_stack(models: dict, X_valid, y_valid, task: str, n_classes=None, rando
     return StackEnsemble(models, meta, task, n_classes=n_classes)
 
 
-def build_ensembles(models: dict, splits: dict, task: str, labels=None, top_k=None, random_state=SEED) -> dict:
+def build_ensembles(
+    models: dict,
+    splits: dict,
+    task: str,
+    labels=None,
+    random_state: int = SEED,
+) -> dict:
     """
     Assemble the blend and stack ensembles from the fitted base roster.
-
-    Optionally restrict to the best `top_k` base models (by validation error) so a
-    handful of weak learners don't dilute the ensemble.
 
     Args:
         models (dict): Base model name -> fitted estimator.
         splits (dict): 'Train'/'Valid'/'Test' -> (X, y); only 'Valid' is used here.
         task (str): 'regression' or 'classification'.
         labels (list | None): Ordered label set (classification only).
-        top_k (int | None): Keep only the best k base models (all if None).
         random_state (int): Seed for the stacking meta-model.
 
     Returns:
@@ -153,19 +156,11 @@ def build_ensembles(models: dict, splits: dict, task: str, labels=None, top_k=No
         and 'members' (base models used).
     """
     X_valid, y_valid = splits["Valid"]
-    selected = models
-    if top_k is not None and top_k < len(models):
-        if task == "regression":
-            error = {n: root_mean_squared_error(y_valid, m.predict(X_valid)) for n, m in models.items()}
-        else:
-            error = {n: log_loss(y_valid, m.predict_proba(X_valid), labels=labels) for n, m in models.items()}
-        keep = sorted(error, key=error.get)[:top_k]
-        selected = {name: models[name] for name in keep}
 
-    weights = blend_weights(selected, X_valid, y_valid, task, labels=labels)
+    weights = blend_weights(models, X_valid, y_valid, task, labels=labels)
     n_classes = len(labels) if labels is not None else None
     ensembles = {
-        "Blend": BlendEnsemble(selected, weights, task),
-        "Stack": build_stack(selected, X_valid, y_valid, task, n_classes=n_classes, random_state=random_state),
+        "Blend": BlendEnsemble(models, weights, task),
+        "Stack": build_stack(models, X_valid, y_valid, task, n_classes=n_classes, random_state=random_state),
     }
-    return {"ensembles": ensembles, "weights": weights, "members": list(selected)}
+    return {"ensembles": ensembles, "weights": weights, "members": list(models)}

@@ -1,7 +1,7 @@
 import numpy as np
 import optuna
 import pandas as pd
-from config.settings import SEED
+from joblib import parallel_config
 from lightgbm import LGBMClassifier, LGBMRegressor
 from scipy.stats import loguniform, randint, uniform
 from sklearn.base import clone
@@ -18,8 +18,10 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC, SVR
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from src.models.evaluate import CV_SCORING
 from xgboost import XGBClassifier, XGBRegressor
+
+from config.settings import SEED
+from src.models.evaluate import CV_SCORING
 
 # Regression selects on RMSE, not R2: near-constant target windows (ZIRP-era CV folds,
 # the COVID dev window) make fold R2 explode while RMSE stays comparable across models.
@@ -257,30 +259,29 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
 def build_pipeline(
     estimator,
     needs_scaling: bool,
-    task: str | None = None,
-    k_features: int | None = None,
+    task: str,
+    k_features: int,
 ) -> Pipeline:
     """
     Wrap an estimator in a Pipeline so preprocessing is fit on train folds only.
 
-    A univariate SelectKBest filter is prepended when `k_features` is given, so the
-    selection is re-fit inside every CV fold (leakage-safe) and curbs the p >> n
-    overfit on the monthly frame.
+    A univariate SelectKBest filter is prepended so feature selection is re-fit
+    inside every CV fold (leakage-safe) and curbs the p >> n overfit on the monthly
+    frame.
 
     Args:
         estimator: The final sklearn-compatible estimator.
         needs_scaling (bool): Prepend a StandardScaler for scale-sensitive models.
-        task (str | None): 'classification' or 'regression'; picks the SelectKBest
-            score function. Selection is skipped when None.
-        k_features (int | None): Number of features to keep; no selection when None.
+        task (str): 'classification' or 'regression'; picks the SelectKBest
+            score function.
+        k_features (int): Number of features to keep.
 
     Returns:
         Pipeline: The assembled pipeline with the estimator as step 'model'.
     """
     steps = []
-    if k_features is not None and task is not None:
-        score_func = f_classif if task == "classification" else f_regression
-        steps.append(("select", SelectKBest(score_func=score_func, k=k_features)))
+    score_func = f_classif if task == "classification" else f_regression
+    steps.append(("select", SelectKBest(score_func=score_func, k=k_features)))
     if needs_scaling:
         steps.append(("scaler", StandardScaler()))
     steps.append(("model", estimator))
@@ -309,27 +310,29 @@ def auto_k_features(n_rows: int, n_features: int, n_splits: int = 5) -> int:
     return max(5, min(n_features, smallest_fold // 4))
 
 
-def chronological_split(X: pd.DataFrame, y: pd.Series, preset: str = "70/15/15") -> dict:
+def chronological_split(X: pd.DataFrame, y: pd.Series, preset: str = "70/15/15", gap: int = 0) -> dict:
     """
     Split X/y chronologically into train/valid/test without shuffling.
+
+    The target of row t is realised at t + horizon, so the last `gap` rows before
+    each boundary are dropped from the earlier split: their labels would otherwise
+    already contain outcomes from the period the next split is evaluated on.
 
     Args:
         X (pd.DataFrame): Feature matrix, already ordered by date.
         y (pd.Series): Aligned target.
         preset (str): One of SPLIT_PRESETS.
+        gap (int): Rows purged before each boundary (the target horizon in months).
 
     Returns:
         dict: 'Train'/'Valid'/'Test' -> (X_slice, y_slice), preserving order.
     """
     train_frac, valid_frac = SPLIT_PRESETS[preset]
     n = len(X)
-    n_train = int(n * train_frac)
-    n_valid = int(n * valid_frac)
-    return {
-        "Train": (X.iloc[:n_train], y.iloc[:n_train]),
-        "Valid": (X.iloc[n_train : n_train + n_valid], y.iloc[n_train : n_train + n_valid]),
-        "Test": (X.iloc[n_train + n_valid :], y.iloc[n_train + n_valid :]),
-    }
+    valid_start = int(n * train_frac)
+    test_start = valid_start + int(n * valid_frac)
+    bounds = {"Train": (0, valid_start - gap), "Valid": (valid_start, test_start - gap), "Test": (test_start, n)}
+    return {name: (X.iloc[lo:hi], y.iloc[lo:hi]) for name, (lo, hi) in bounds.items()}
 
 
 def search_estimator(pipe, space, X, y, scoring, cv, budget, random_state=SEED):
@@ -368,7 +371,8 @@ def search_estimator(pipe, space, X, y, scoring, cv, budget, random_state=SEED):
             n_jobs=-1,
             refit=True,
         )
-        search.fit(X, y)
+        with parallel_config(backend="threading"):
+            search.fit(X, y)
         return search.best_estimator_, search.best_params_, float(search.best_score_)
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -384,17 +388,17 @@ def search_estimator(pipe, space, X, y, scoring, cv, budget, random_state=SEED):
 
 
 def train_roster(
-    X,
-    y,
-    task,
+    X: pd.DataFrame,
+    y: pd.Series,
+    task: str,
     *,
-    budget="Fast",
-    n_splits=5,
-    scoring=None,
-    models=None,
-    class_weight=True,
-    k_features="auto",
-    random_state=SEED,
+    budget: str = "Fast",
+    n_splits: int = 5,
+    gap: int = 0,
+    scoring: str | None = None,
+    class_weight: bool = True,
+    k_features: int | str = "auto",
+    random_state: int = SEED,
     progress=None,
 ) -> dict:
     """
@@ -411,7 +415,9 @@ def train_roster(
         budget (str): One of BUDGET_TIERS.
         n_splits (int): Number of TimeSeriesSplit folds.
         scoring (str | None): Display metric driving selection; defaults per task.
-        models (list | None): Subset of roster names to train (all if None).
+        gap (int): Rows skipped between each fold's training and validation blocks
+            (the target horizon), so no training label is realised inside its own
+            validation block.
         class_weight (bool): Pass 'balanced' weighting where supported (clf).
         k_features (int | str): 'auto' sizes the in-CV SelectKBest to the smallest CV
             fold (see `auto_k_features`), or an explicit count.
@@ -425,7 +431,7 @@ def train_roster(
     """
     scoring = scoring or DEFAULT_SCORING[task]
     scorer = CV_SCORING[scoring]
-    cv = TimeSeriesSplit(n_splits=n_splits)
+    cv = TimeSeriesSplit(n_splits=n_splits, gap=gap)
 
     if k_features == "auto":
         k_features = auto_k_features(len(X), X.shape[1], n_splits)
@@ -437,8 +443,6 @@ def train_roster(
         y = pd.Series(encoder.transform(y), index=y.index)
 
     roster = model_roster(task, random_state=random_state, class_weight=class_weight)
-    if models:
-        roster = {name: cfg for name, cfg in roster.items() if name in models}
 
     fitted, cv_scores, params = {}, {}, {}
     total = len(roster)

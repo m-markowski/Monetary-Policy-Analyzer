@@ -82,7 +82,35 @@ def available_value_targets(df: pd.DataFrame, economy: str) -> dict[str, dict]:
     return {name: spec for name, spec in specs.items() if spec["column"] in df.columns}
 
 
-def direction_target(df: pd.DataFrame, economy: str, horizon: int, deadband: float = 0.125) -> pd.Series | None:
+def policy_rate_column(economy: str) -> str | None:
+    """Source column of the economy's policy rate, or None if no curated policy target exists."""
+    return CURATED_TARGETS.get(economy, {}).get("Policy rate", {}).get("column")
+
+
+def deadband_labels(change: pd.Series, deadband: float) -> pd.Series:
+    """
+    Map a rate change to Hike / Hold / Cut, treating |change| <= deadband as Hold.
+
+    Args:
+        change (pd.Series): Rate change per row, NaN where it cannot be computed.
+        deadband (float): Minimum absolute change (in points) to count as a move.
+
+    Returns:
+        pd.Series: Categorical labels, pd.NA where the change is missing.
+    """
+    labels = pd.Series("Hold", index=change.index, dtype="object")
+    labels[change > deadband] = "Hike"
+    labels[change < -deadband] = "Cut"
+    labels[change.isna()] = pd.NA
+    return labels.astype("category")
+
+
+def direction_target(
+    df: pd.DataFrame,
+    economy: str,
+    horizon: int,
+    deadband: float = 0.125,
+) -> pd.Series | None:
     """
     Build the forward policy-rate decision label (Hike / Hold / Cut).
 
@@ -99,18 +127,18 @@ def direction_target(df: pd.DataFrame, economy: str, horizon: int, deadband: flo
         pd.Series | None: Categorical labels ('Hike', 'Hold', 'Cut'), or None if the
         policy-rate column is unavailable.
     """
-    col = CURATED_TARGETS.get(economy, {}).get("Policy rate", {}).get("column")
+    col = policy_rate_column(economy)
     if col is None or col not in df.columns:
         return None
-    forward_change = df[col].shift(-horizon) - df[col]
-    labels = pd.Series("Hold", index=df.index, dtype="object")
-    labels[forward_change > deadband] = "Hike"
-    labels[forward_change < -deadband] = "Cut"
-    labels[forward_change.isna()] = pd.NA
-    return labels.astype("category").rename("policy_direction")
+    return deadband_labels(df[col].shift(-horizon) - df[col], deadband).rename("policy_direction")
 
 
-def momentum_baseline(df: pd.DataFrame, economy: str, horizon: int, deadband: float = 0.125) -> pd.Series | None:
+def momentum_baseline(
+    df: pd.DataFrame,
+    economy: str,
+    horizon: int,
+    deadband: float = 0.125,
+) -> pd.Series | None:
     """
     Naive trailing-momentum prediction for the direction target.
 
@@ -129,41 +157,28 @@ def momentum_baseline(df: pd.DataFrame, economy: str, horizon: int, deadband: fl
         pd.Series | None: Categorical labels ('Hike', 'Hold', 'Cut'), or None if the
         policy-rate column is unavailable.
     """
-    col = CURATED_TARGETS.get(economy, {}).get("Policy rate", {}).get("column")
+    col = policy_rate_column(economy)
     if col is None or col not in df.columns:
         return None
-    trailing_change = df[col] - df[col].shift(horizon)
-    labels = pd.Series("Hold", index=df.index, dtype="object")
-    labels[trailing_change > deadband] = "Hike"
-    labels[trailing_change < -deadband] = "Cut"
-    labels[trailing_change.isna()] = pd.NA
-    return labels.astype("category").rename("momentum_baseline")
+    return deadband_labels(df[col] - df[col].shift(horizon), deadband).rename("momentum_baseline")
 
 
-def value_target(df: pd.DataFrame, column: str, horizon: int, kind: str = "change") -> pd.Series | None:
+def value_target(df: pd.DataFrame, column: str, horizon: int) -> pd.Series | None:
     """
-    Build a forward-looking regression target from a curated series.
+    Build the forward-change regression target from a curated series.
 
-    'level' returns the value `horizon` rows ahead; 'change' returns the ahead-minus-
-    now difference.
+    The change (value `horizon` rows ahead minus today's) is modelled rather than
+    the level, so a trending series does not fake a near-perfect fit.
 
     Args:
         df (pd.DataFrame): Monthly modelling frame containing the source column.
         column (str): Source column name (from `CURATED_TARGETS`).
         horizon (int): Number of rows (months on the monthly frame) to look ahead.
-        kind (str): 'level' or 'change'.
 
     Returns:
-        pd.Series | None: The forward target named '<column>_fwd_<kind>', or None if
-        the column is missing or `kind` is unrecognised.
+        pd.Series | None: The forward change named '<column>_fwd_change', or None if
+        the column is missing.
     """
     if column not in df.columns:
         return None
-    forward = df[column].shift(-horizon)
-    if kind == "level":
-        target = forward
-    elif kind == "change":
-        target = forward - df[column]
-    else:
-        return None
-    return target.rename(f"{column}_fwd_{kind}")
+    return (df[column].shift(-horizon) - df[column]).rename(f"{column}_fwd_change")

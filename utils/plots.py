@@ -537,7 +537,7 @@ def compare_lines(
         fig.update_layout(
             template=TEMPLATE,
             title={
-                "text": cols[0] if not title else title,
+                "text": title if title else cols[0],
                 "x": 0.5,
                 "xanchor": "center",
             },

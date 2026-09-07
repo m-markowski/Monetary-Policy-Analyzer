@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+
 from src.dataset_builder import ECONOMIES, cache_exists, load_master, master_mtime
 from src.regimes import available_regimes, regime_source_columns
 from utils import interpret
@@ -120,22 +121,24 @@ def allowed_transforms(family: str) -> list[str]:
     return ["Level", "Log return (%)", "First difference"]
 
 
-def collapse_to_monthly(level: pd.Series) -> pd.Series:
+def collapse_to_monthly(series: pd.Series) -> pd.Series:
     """
     Down-sample to one value per month so tests see near-independent observations.
 
     The master data is daily with low-frequency macro series forward-filled and
     policy rates held as step functions, so consecutive daily rows are largely
     redundant and inflate the sample size. Taking the month-end value removes most
-    of that redundancy while preserving genuine held periods proportionally.
+    of that redundancy while preserving genuine held periods proportionally. Works
+    for regime labels too: the label is the regime in force on the month's last
+    trading day, on the same calendar month-end index as the numeric series.
 
     Args:
-        level (pd.Series): Date-indexed level series.
+        series (pd.Series): Date-indexed level or categorical series.
 
     Returns:
         pd.Series: Month-end sampled series with gaps dropped.
     """
-    return level.resample("ME").last().dropna()
+    return series.resample("ME").last().dropna()
 
 
 def apply_transform(level: pd.Series, transform: str) -> pd.Series:
@@ -558,7 +561,10 @@ with tab_rel:
         else:
             pair = prepare_frame(df, [x_var, y_var], rel_transform, date_range, monthly=rel_monthly)
             if color_choice != "None":
-                pair = pair.join(regimes[color_choice].rename("regime"))
+                regime = regimes[color_choice]
+                if rel_monthly:
+                    regime = collapse_to_monthly(regime)
+                pair = pair.join(regime.rename("regime"))
             fig_scatter = scatter_ols(
                 pair,
                 x=x_var,
@@ -747,6 +753,8 @@ with tab_regime:
         cmp_series = prepare_series(df[cmp_var], cmp_transform, cmp_monthly, date_range)
         cmp_label = cmp_var if cmp_transform == "Level" else f"{cmp_var} - {cmp_transform}"
         groups = regimes[group_choice]
+        if cmp_monthly:
+            groups = collapse_to_monthly(groups)
 
         if cmp_transform == "Level":
             st.caption(
@@ -882,7 +890,11 @@ with tab_regime:
                             "Mean difference": tukey["meandiff"].astype(float).round(3),
                             ci_label: [
                                 f"[{lo:.3f}, {hi:.3f}]"
-                                for lo, hi in zip(tukey["lower"].astype(float), tukey["upper"].astype(float))
+                                for lo, hi in zip(
+                                    tukey["lower"].astype(float),
+                                    tukey["upper"].astype(float),
+                                    strict=True,
+                                )
                             ],
                             "p-value (adjusted)": tukey["p-adj"].astype(float).map(interpret.format_pvalue),
                             "Different?": tukey["reject"].astype(bool).map({True: "Yes", False: "No"}),
@@ -1015,6 +1027,8 @@ with tab_structure:
                 pca = bundle["pca"]
                 sweep = bundle["sweep"]
                 scores = pca["scores"]
+                # Regime labels on the same index as the clustered rows.
+                regime_labels = {n: collapse_to_monthly(s) for n, s in regimes.items()} if struct_monthly else regimes
 
                 if bundle["hopkins"] is not None:
                     st.markdown("**Clustering tendency**")
@@ -1072,7 +1086,7 @@ with tab_structure:
                     if proj_choice == "Cluster":
                         color_series, cmap = km["labels"], None
                     else:
-                        color_series = regimes[proj_choice].reindex(scores.index)
+                        color_series = regime_labels[proj_choice].reindex(scores.index)
                         cmap = REGIME_COLORS
                     fig_proj = projection_scatter(
                         scores,
@@ -1110,8 +1124,8 @@ with tab_structure:
                             key="struct_regime",
                             help=interpret.REGIME_AVAILABILITY_HELP,
                         )
-                        agree = cluster_agreement(km["labels"], regimes[reg_choice])
-                        pair = pd.DataFrame({"Cluster": km["labels"], reg_choice: regimes[reg_choice]}).dropna()
+                        agree = cluster_agreement(km["labels"], regime_labels[reg_choice])
+                        pair = pd.DataFrame({"Cluster": km["labels"], reg_choice: regime_labels[reg_choice]}).dropna()
                         assoc = categorical_association(pair["Cluster"], pair[reg_choice], alpha=0.05)
                         if agree is None or assoc is None:
                             st.info("Not enough overlap between clusters and this regime.")
@@ -1121,5 +1135,5 @@ with tab_structure:
                                 help=interpret.CLUSTER_REGIME_HELP,
                             )
                             st.caption(interpret.cramers_v_verdict(assoc["cramers_v"]))
-                            st.markdown(f"**Day counts: cluster (rows) × {reg_choice} (columns)**")
+                            st.markdown(f"**Observation counts: cluster (rows) x {reg_choice} (columns)**")
                             st.dataframe(assoc["table"], width="stretch")

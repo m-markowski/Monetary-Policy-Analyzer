@@ -322,9 +322,9 @@ def arima_backtest(series: pd.Series, order=(1, 0, 0), seasonal_order=(0, 0, 0, 
     """
     Holdout accuracy check for one ARIMA specification.
 
-    The displayed forecast model is fit on the full series; this side-fit refits the
-    same specification without the last `holdout` observations, forecasts them and
-    reports the errors, so accuracy is measured on data the fit never saw.
+    The caller chooses the order on the pre-holdout window; this fits that specification
+    without the last holdout observations, forecasts them and reports the errors, so neither
+    the order nor the fit saw the scored months.
 
     Args:
         series (pd.Series): Series to model (month-end-indexed for the monthly view).

@@ -26,8 +26,8 @@ NORMALITY_GUIDE = (
     "normal. Small p = strong evidence *against* normality.\n"
     "- **normal? (α)** - 'Yes' when p ≥ α (cannot rule out normal), 'No' when p < α "
     "(reject normal).\n"
-    "- **Anderson-Darling** reports no p-value by design; its verdict compares the "
-    "statistic to a critical value at α (smaller statistic = closer to normal).\n"
+    "- **Anderson-Darling** reports a p-value interpolated from its critical-value table, "
+    "so it is capped at 0.15 (larger values all read as 'clearly not rejected').\n"
     "- **Shapiro-Wilk** is shown only for samples ≤ 5000; beyond that its p-value is "
     "unreliable, so it is skipped.\n\n"
     "*Caveat for this data:* these tests gain power with sample size. On the full daily "
@@ -194,10 +194,15 @@ MONTHLY_RATIONALE = (
 SPLIT_HELP = (
     "The data is split in time order (no shuffling) into train, dev and test. Train fits the models; "
     "dev picks the class thresholds and blend weights, and steers early stopping for the neural nets "
-    "- kept separate so none of those choices peeks at the test set. Presets keep dev and test roughly equal in size."
+    "- kept separate so none of those choices peeks at the test set. Because a row's target is realised "
+    "`horizon` months later, the last `horizon` rows before every boundary are purged from the earlier "
+    "split. Presets keep dev and test roughly equal in size."
 )
 
-CV_HELP = "Cross-validation uses `TimeSeriesSplit`: each fold trains on the past and validates on the next block."
+CV_HELP = (
+    "Cross-validation uses `TimeSeriesSplit` with the same `horizon`-long gap: each fold trains on the "
+    "past, skips the months whose labels are not yet realised and validates on the next block."
+)
 
 BUDGET_HELP = (
     "The training budget controls how hard the search for good hyperparameters works. Fast and "
@@ -421,10 +426,10 @@ FORECAST_HELP = (
 ARIMA_HELP = (
     "ARIMA/SARIMA models a series from its own past values (AR), past forecast errors (MA) and "
     "differencing (I) that removes a trend; the seasonal part repeats that at an annual period. The app "
-    "chooses the order for you: it grid-searches candidate orders (seasonal ones included), ranks them "
-    "by information criteria (lower AIC/BIC is better) and checks the residuals for leftover "
-    "autocorrelation (Ljung-Box). The ACF/PACF charts and the candidate table are informational - "
-    "useful mainly if you override the order manually."
+    "chooses the order for you on the history before the 12-month holdout: it grid-searches candidate orders "
+    "(seasonal ones included), ranks them by information criteria (lower AIC/BIC is better) and checks the "
+    "residuals for leftover autocorrelation (Ljung-Box). The ACF/PACF charts and the candidate table are "
+    "informational - useful mainly if you override the order manually."
 )
 
 GARCH_HELP = (
@@ -506,7 +511,7 @@ def format_number(x: float, decimals: int = 2) -> str:
         str: Formatted value, or an em dash for missing values.
     """
     if pd.isna(x):
-        return "—"
+        return "-"
     if x != 0 and abs(x) < 1:
         decimals = max(decimals, 4)
     return f"{x:,.{decimals}f}"
@@ -517,14 +522,14 @@ def format_pvalue(p: float, threshold: float = 1e-5) -> str:
     Format a p-value for display, flooring tiny values and flagging missing ones.
 
     Args:
-        p (float): The p-value (NaN for tests that report none, e.g. Anderson-Darling).
+        p (float): The p-value.
         threshold (float): Values below this are shown as '<threshold' instead of 0.
 
     Returns:
-        str: A readable p-value, '<0.00001' for tiny values, or '—' when absent.
+        str: A readable p-value, '<0.00001' for tiny values, or '-' when absent.
     """
     if pd.isna(p):
-        return "—"
+        return "-"
     if p < threshold:
         return f"<{threshold:.5f}"
     return f"{p:.5f}"

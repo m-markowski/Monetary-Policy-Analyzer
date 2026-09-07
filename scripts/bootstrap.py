@@ -7,14 +7,12 @@ import importlib
 import importlib.metadata
 import json
 import os
-import platform
 import re
 import runpy
 import signal
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -73,19 +71,9 @@ def read_json(path: Path) -> dict:
         return {}
 
 
-def atomic_write(path: Path, text: str) -> None:
-    if path.is_symlink():
-        raise SetupError(f"Refusing to replace a symbolic link: {path}")
+def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-            temporary = Path(handle.name)
-            handle.write(text)
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def read_env_text(path: Path) -> str:
@@ -97,18 +85,18 @@ def read_env_text(path: Path) -> str:
         encoding = "utf-16" if data.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
         return data.decode(encoding)
     except UnicodeError as exc:
-        raise SetupError(f"{path} is not a valid text file. Remove the unused template and run start.bat again.") from exc
+        raise SetupError(
+            f"{path} is not a valid text file. Remove the unused template and run start.bat again."
+        ) from exc
 
 
 def read_env_key(path: Path = ENV_FILE) -> str:
-    values = []
+    key = ""
     for line in read_env_text(path).splitlines():
-        if not KEY_LINE.match(line):
-            continue
-        value = line.split("=", 1)[1].strip()
-        match = re.fullmatch(r'''(?:"([a-z0-9]{32})"|'([a-z0-9]{32})'|([a-z0-9]{32}))\s*(?:#.*)?''', value)
-        values.append(next((group for group in match.groups() if group is not None), "") if match else "")
-    return values[0] if len(values) == 1 else ""
+        if KEY_LINE.match(line):
+            value = line.split("=", 1)[1].split("#", 1)[0].strip().strip("'\"")
+            key = value if KEY_PATTERN.fullmatch(value) else ""
+    return key
 
 
 def save_env_key(key: str, path: Path = ENV_FILE) -> None:
@@ -125,7 +113,7 @@ def save_env_key(key: str, path: Path = ENV_FILE) -> None:
             lines.append(line)
     if not replaced:
         lines.append(f"FRED_API_KEY={key}")
-    atomic_write(path, "\n".join(lines) + "\n")
+    write_text(path, "\n".join(lines) + "\n")
 
 
 def validate_key_online(key: str) -> None:
@@ -151,7 +139,9 @@ def validate_key_online(key: str) -> None:
                 raise InvalidKey("FRED rejected this API key. Check that it is a registered, active key.") from None
             reason = f"FRED returned HTTP {exc.code}"
             if exc.code not in (408, 429) and exc.code < 500:
-                raise SetupError(f"{reason}. The key has not been changed; check network/proxy access to FRED.") from None
+                raise SetupError(
+                    f"{reason}. The key has not been changed; check network/proxy access to FRED."
+                ) from None
         except (urllib.error.URLError, TimeoutError, OSError):
             reason = "FRED could not be reached over a verified HTTPS connection"
         except ValueError:
@@ -164,14 +154,14 @@ def validate_key_online(key: str) -> None:
 
 def record_valid_key(key: str) -> None:
     digest = hashlib.sha256(key.encode()).hexdigest()
-    atomic_write(RUNTIME / "fred-validation.json", json.dumps({"key_hash": digest}) + "\n")
+    write_text(RUNTIME / "fred-validation.json", json.dumps({"key_hash": digest}) + "\n")
 
 
-def ensure_key(reset: bool = False, check: bool = False) -> str:
+def ensure_key(reset: bool = False) -> str:
     say("\n[3/5] Checking config/.env...")
     key = read_env_key()
     validated = read_json(RUNTIME / "fred-validation.json").get("key_hash")
-    if key and not reset and not check and validated == hashlib.sha256(key.encode()).hexdigest():
+    if key and not reset and validated == hashlib.sha256(key.encode()).hexdigest():
         # Normalize files written by older PowerShell commands to UTF-8.
         save_env_key(key)
         say("Using the previously verified FRED key. No online check is needed.")
@@ -215,55 +205,6 @@ def python_command(*arguments: str) -> list[str]:
     return [str(venv_python()), "-I", "-X", "utf8", *arguments]
 
 
-def environment_fingerprint() -> str:
-    digest = hashlib.sha256(str(ROOT).encode())
-    digest.update(str(Path(sys.executable).resolve()).encode())
-    digest.update(sys.version.encode())
-    for name in (
-        "pyproject.toml",
-        "uv.lock",
-        ".python-version",
-        "scripts/bootstrap.py",
-        "scripts/start.ps1",
-        ".venv/pyvenv.cfg",
-    ):
-        path = ROOT / name
-        digest.update(name.encode())
-        digest.update(path.read_bytes().replace(b"\r\n", b"\n") if path.is_file() else b"<missing>")
-    return digest.hexdigest()
-
-
-def local_venv_is_usable(env: dict[str, str]) -> bool:
-    if VENV.is_symlink() or VENV.is_junction():
-        raise SetupError(".venv must be a real directory inside this repository, not a directory link.")
-    if not venv_python().is_file():
-        return False
-    code = "import json,sys; print(json.dumps([sys.base_prefix, list(sys.version_info[:2])]))"
-    try:
-        result = subprocess.run(
-            python_command("-c", code), capture_output=True, text=True, encoding="utf-8", env=env, check=True, timeout=15
-        )
-        prefix, version = json.loads(result.stdout)
-        return version == [3, 12] and Path(prefix).resolve().is_relative_to((RUNTIME / "python").resolve())
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return False
-
-
-def installed_packages(env: dict[str, str]) -> dict[str, str]:
-    code = (
-        "import importlib.metadata as m,json,re; "
-        "print(json.dumps({re.sub(r'[-_.]+','-',d.metadata['Name']).lower():d.version for d in m.distributions()}))"
-    )
-    try:
-        result = subprocess.run(
-            python_command("-c", code), capture_output=True, text=True, encoding="utf-8", env=env, check=True, timeout=20
-        )
-        packages = json.loads(result.stdout)
-        return packages if isinstance(packages, dict) else {}
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return {}
-
-
 def failure_message(code: int) -> str:
     hint = {
         0xC000001D: "A native library used an unsupported CPU instruction. TensorFlow requires a compatible AVX-capable CPU.",
@@ -301,49 +242,23 @@ def process_environment(key: str) -> dict[str, str]:
     return env
 
 
-def prepare_environment(env: dict[str, str], repair: bool = False, update_lock: bool = False) -> None:
+def prepare_environment(env: dict[str, str], repair: bool = False) -> None:
     say("\n[4/5] Checking the application environment...")
-    state_file = RUNTIME / "environment.json"
-    state = read_json(state_file)
-    usable = local_venv_is_usable(env)
-    current = usable and state.get("fingerprint") == environment_fingerprint()
-    if current and not repair and not update_lock:
-        packages = installed_packages(env)
-        if packages and packages == state.get("packages"):
-            result = subprocess.run(
-                [str(UV), "pip", "check", "--python", str(venv_python()), "--offline"],
-                cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", check=False,
-            )
-            if result.returncode == 0:
-                say("The environment is up to date. Skipping dependency installation.")
-                return
-        say("The environment has changed. Synchronising its dependencies...")
-    state_file.unlink(missing_ok=True)
-    if not usable:
-        run_step(
-            [str(UV), "venv", "--python", sys.executable, "--clear", str(VENV)], env,
-            "Creating .venv with local Python 3.12 (replacing an incompatible .venv if present)...",
-        )
-    command = [str(UV), "sync", "--python", sys.executable]
-    if (ROOT / "uv.lock").is_file() and not update_lock:
-        command.append("--locked")
-        say("Using the versions recorded in uv.lock.")
-    else:
-        say("Creating/updating uv.lock. The repository maintainer should commit this file after testing.")
+    first_install = not venv_python().is_file()
+    command = [str(UV), "sync", "--locked", "--python", sys.executable]
     for name in BINARY_PACKAGES:
         command.extend(["--no-build-package", name])
     if repair:
         command.append("--reinstall")
-    run_step(command, env, "Installing dependencies, including TensorFlow/Keras, Ruff and the editable project...")
-    run_step(
-        python_command(str(Path(__file__).resolve()), "--check-runtime"), env,
-        "Checking imports, local native libraries, editable installation and neural networks...",
-    )
-    packages = installed_packages(env)
-    if not packages:
-        raise SetupError("Could not read the installed package metadata. Run start.bat --repair.")
-    atomic_write(state_file, json.dumps({"fingerprint": environment_fingerprint(), "packages": packages}) + "\n")
-    say("Environment setup completed successfully.")
+    # uv compares .venv with uv.lock itself and does nothing when they already match.
+    run_step(command, env, "Synchronising dependencies from uv.lock...")
+    if first_install or repair:
+        run_step(
+            python_command(str(Path(__file__).resolve()), "--check-runtime"),
+            env,
+            "Checking imports, native libraries, the editable install and the neural networks...",
+        )
+    say("Environment is ready.")
 
 
 def configure_dlls() -> None:
@@ -360,9 +275,30 @@ def configure_dlls() -> None:
 def check_runtime() -> None:
     configure_dlls()
     for name in (
-        "numpy", "pandas", "scipy", "pyarrow", "sklearn", "statsmodels.api", "arch", "lightgbm", "xgboost",
-        "shap", "optuna", "plotly", "streamlit", "jinja2", "joblib", "yaml", "dotenv", "fredapi", "yfinance",
-        "tensorflow", "keras", "config.settings", "src.models.pipeline", "utils.plots",
+        "numpy",
+        "pandas",
+        "scipy",
+        "pyarrow",
+        "sklearn",
+        "statsmodels.api",
+        "arch",
+        "lightgbm",
+        "xgboost",
+        "shap",
+        "optuna",
+        "plotly",
+        "streamlit",
+        "jinja2",
+        "joblib",
+        "yaml",
+        "dotenv",
+        "fredapi",
+        "yfinance",
+        "tensorflow",
+        "keras",
+        "config.settings",
+        "src.models.pipeline",
+        "utils.plots",
     ):
         say(f"  Importing {name}...")
         importlib.import_module(name)
@@ -391,9 +327,14 @@ def serve(port: int) -> None:
     yfinance = importlib.import_module("yfinance")
     yfinance.set_tz_cache_location(str(RUNTIME / "yfinance"))
     sys.argv = [
-        "streamlit", "run", str(ROOT / "app/Main_Page.py"),
-        "--server.address=127.0.0.1", f"--server.port={port}", "--server.headless=true",
-        "--server.showEmailPrompt=false", "--browser.gatherUsageStats=false",
+        "streamlit",
+        "run",
+        str(ROOT / "app/Main_Page.py"),
+        "--server.address=127.0.0.1",
+        f"--server.port={port}",
+        "--server.headless=true",
+        "--server.showEmailPrompt=false",
+        "--browser.gatherUsageStats=false",
     ]
     runpy.run_module("streamlit", run_name="__main__")
 
@@ -442,7 +383,9 @@ def start_server(env: dict[str, str], no_browser: bool = False) -> None:
     say(f"\n[5/5] Starting the application at {url} ...")
     process = subprocess.Popen(
         python_command(str(Path(__file__).resolve()), "--serve", str(port)),
-        cwd=ROOT, env=env, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        cwd=ROOT,
+        env=env,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
     )
     try:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -479,8 +422,6 @@ def start_server(env: dict[str, str], no_browser: bool = False) -> None:
 
 
 def main() -> int:
-    if sys.platform != "win32" or platform.machine().upper() != "AMD64":
-        raise SetupError("This launcher supports Windows x64 only. Use start.bat on Windows 10/11.")
     if len(sys.argv) == 2 and sys.argv[1] == "--check-runtime":
         check_runtime()
         return 0
@@ -490,17 +431,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--setup-only", action="store_true", help="prepare the environment without opening the app")
     parser.add_argument("--reset-key", action="store_true", help="prompt for a replacement FRED API key")
-    parser.add_argument("--check-key", action="store_true", help="revalidate the saved FRED API key online")
     parser.add_argument("--repair", action="store_true", help="reinstall dependencies and rerun runtime checks")
-    parser.add_argument("--update-lock", action="store_true", help="allow updating uv.lock after changing dependencies")
     parser.add_argument("--no-browser", action="store_true", help="start the server without opening a browser")
     args = parser.parse_args()
     os.chdir(ROOT)
     if sys.version_info[:2] != (3, 12) or not Path(sys.executable).resolve().is_relative_to(RUNTIME / "python"):
         raise SetupError("Use start.bat so that the repository-local Python 3.12 is used.")
-    key = ensure_key(reset=args.reset_key, check=args.check_key)
+    key = ensure_key(reset=args.reset_key)
     env = process_environment(key)
-    prepare_environment(env, repair=args.repair, update_lock=args.update_lock)
+    prepare_environment(env, repair=args.repair)
     if args.setup_only:
         say("\n[5/5] Setup completed. The application was not started (--setup-only).")
         say("Double-click start.bat to open the application.")

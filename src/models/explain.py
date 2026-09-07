@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
 import shap
-from config.settings import SEED
+from joblib import parallel_config
 from sklearn.inspection import partial_dependence, permutation_importance
 from sklearn.metrics import get_scorer
+
+from config.settings import SEED
 
 
 def final_estimator(model):
@@ -136,9 +138,10 @@ def permutation_importance_scores(
         pd.Series: 0-100 importances, largest first.
     """
     try:
-        result = permutation_importance(
-            model, X, y, scoring=scoring, n_repeats=n_repeats, random_state=random_state, n_jobs=-1
-        )
+        with parallel_config(backend="threading"):
+            result = permutation_importance(
+                model, X, y, scoring=scoring, n_repeats=n_repeats, random_state=random_state, n_jobs=-1
+            )
         drops = result.importances_mean
     except TypeError:
         # The loop is single-threaded and each score call re-predicts the whole base

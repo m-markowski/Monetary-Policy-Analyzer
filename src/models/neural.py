@@ -3,9 +3,11 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-from config.settings import SEED
+import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
+
+from config.settings import SEED
 
 # Quiet TF logs
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
@@ -18,6 +20,8 @@ def make_sequences(values: np.ndarray, lookback: int) -> np.ndarray:
 
     Row i maps to the window ending at i; the first rows are left-padded by
     repeating the first observation so the output has one window per input row.
+    Callers pass the full history so padding only affects the very first months
+    of the sample.
 
     Args:
         values (np.ndarray): Scaled feature matrix (n_samples x n_features).
@@ -111,20 +115,31 @@ class KerasEstimator:
         self.class_weight = class_weight
         self.random_state = random_state
 
-    def transform_inputs(self, X) -> np.ndarray:
-        scaled = self.scaler_.transform(np.asarray(X, dtype=float))
-        if self.kind == "lstm":
-            return make_sequences(scaled, self.lookback)
-        return scaled
+    def transform_inputs(self, X: pd.DataFrame) -> np.ndarray:
+        if self.kind != "lstm":
+            return self.scaler_.transform(np.asarray(X, dtype=float))
 
-    def fit(self, X, y):
+        # Each window ends at a row of X and reaches back into the stored feature
+        # history, so dev/test/scenario rows are preceded by their real past months
+        # rather than copies of themselves. Rows of X replace history rows at the
+        # same dates, which is what lets an edited scenario row take effect.
+        context = pd.concat([self.history_.drop(index=X.index, errors="ignore"), X]).sort_index()
+        windows = make_sequences(
+            self.scaler_.transform(context.to_numpy(dtype=float)),
+            self.lookback,
+        )
+        return windows[context.index.get_indexer(X.index)]
+
+    def fit(self, X: pd.DataFrame, y, history: pd.DataFrame | None = None):
         import keras
 
         keras.utils.set_random_seed(self.random_state)
         # Seeds the Python/NumPy/TF RNGs. GPU kernels and some parallel ops stay
         # nondeterministic, so neural runs are close but not bit-identical.
-        values = np.asarray(X, dtype=float)
-        self.scaler_ = StandardScaler().fit(values)
+        # The scaler sees training rows only; history supplies earlier feature rows
+        # for the LSTM windows and carries no labels.
+        self.history_ = X if history is None else history
+        self.scaler_ = StandardScaler().fit(np.asarray(X, dtype=float))
         prepared = self.transform_inputs(X)
         input_shape = prepared.shape[1:]
 
@@ -135,7 +150,7 @@ class KerasEstimator:
             target = np.searchsorted(self.classes_, y)
             if self.class_weight:
                 balanced = compute_class_weight("balanced", classes=self.classes_, y=np.asarray(y))
-                weights = {i: w for i, w in enumerate(balanced)}
+                weights = dict(enumerate(balanced))
         else:
             n_outputs = 1
             target = np.asarray(y, dtype=float)
@@ -211,7 +226,15 @@ def neural_models(task, lookback=6, class_weight=True, random_state=SEED) -> dic
 
 
 def fit_neural_models(
-    X, y, task, *, models=None, lookback=6, class_weight=True, random_state=SEED, progress=None
+    X: pd.DataFrame,
+    y,
+    task: str,
+    *,
+    history: pd.DataFrame,
+    lookback: int = 6,
+    class_weight: bool = True,
+    random_state: int = SEED,
+    progress=None,
 ) -> dict:
     """
     Fit the neural roster on the training split.
@@ -224,7 +247,8 @@ def fit_neural_models(
         X, y: Training split (y label-encoded for classification, matching the
             sklearn roster so predictions align in the shared leaderboard).
         task (str): 'regression' or 'classification'.
-        models (list | None): Subset of neural names to fit (all if None).
+        history (pd.DataFrame): Every feature-complete month (labelled or not),
+            date-indexed; the LSTM builds each row's window from the months preceding it.
         lookback (int): Window length for the sequence models.
         class_weight (bool): Balance classes during training (classification).
         random_state (int): Seed.
@@ -234,13 +258,11 @@ def fit_neural_models(
         dict: Model name -> fitted KerasEstimator.
     """
     roster = neural_models(task, lookback=lookback, class_weight=class_weight, random_state=random_state)
-    if models:
-        roster = {name: est for name, est in roster.items() if name in models}
 
     fitted = {}
     total = len(roster)
     for done, (name, estimator) in enumerate(roster.items(), start=1):
-        estimator.fit(X, y)
+        estimator.fit(X, y, history=history)
         fitted[name] = estimator
         if progress:
             progress(done, total, name, None)

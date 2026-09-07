@@ -3,8 +3,8 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-from config.settings import PROJECT_ROOT
 
+from config.settings import PROJECT_ROOT
 from src.data_loader import EconomyDataLoader
 
 DATA_DIR = PROJECT_ROOT / "data"

@@ -4,6 +4,7 @@ import time
 import numpy as np
 import pandas as pd
 import streamlit as st
+
 from src.dataset_builder import ECONOMIES, cache_exists, load_master, master_mtime
 from src.models import econometrics, ensemble, evaluate, explain, features, pipeline, registry, targets
 from src.models import neural as neural_mod
@@ -41,58 +42,67 @@ def get_monthly_complete(economy: str, mtime: float) -> pd.DataFrame:
     return monthly
 
 
+# Months held out of the order search and used to score the forecast models.
+FORECAST_HOLDOUT = 12
+
+
 @st.cache_data(show_spinner=False)
 def arima_search(economy: str, series_col: str, mtime: float) -> dict | None:
-    """Cached Box-Jenkins ARIMA order search for one monthly series."""
+    """Cached ARIMA order search on the history before the holdout, so the holdout never informs the order."""
     series = get_monthly_complete(economy, mtime)[series_col].dropna()
-    return econometrics.arima_order_search(series)
+    return econometrics.arima_order_search(series.iloc[:-FORECAST_HOLDOUT])
 
 
 @st.cache_data(show_spinner=False)
 def garch_search(economy: str, series_col: str, mtime: float) -> dict | None:
-    """Cached GARCH order search for one monthly series' first difference."""
+    """Cached GARCH order search on the pre-holdout monthly changes."""
     change = get_monthly_complete(economy, mtime)[series_col].diff().dropna()
-    return econometrics.garch_order_search(change)
+    return econometrics.garch_order_search(change.iloc[:-FORECAST_HOLDOUT])
 
 
 @st.cache_data(show_spinner=False)
 def arima_accuracy(economy: str, series_col: str, order: tuple, seasonal_order: tuple, mtime: float) -> dict | None:
-    """Cached holdout accuracy for one ARIMA specification on a monthly series."""
+    """Cached holdout accuracy: fit on the pre-holdout history, forecast the held-out months."""
     series = get_monthly_complete(economy, mtime)[series_col].dropna()
-    return econometrics.arima_backtest(series, order=order, seasonal_order=seasonal_order)
+    return econometrics.arima_backtest(series, order=order, seasonal_order=seasonal_order, holdout=FORECAST_HOLDOUT)
 
 
 @st.cache_data(show_spinner=False)
 def garch_accuracy(economy: str, series_col: str, order: tuple, mtime: float) -> dict | None:
     """Cached holdout volatility accuracy for one GARCH specification."""
     change = get_monthly_complete(economy, mtime)[series_col].diff().dropna()
-    return econometrics.garch_backtest(change, p=order[0], q=order[1])
+    return econometrics.garch_backtest(change, p=order[0], q=order[1], holdout=FORECAST_HOLDOUT)
 
 
-def build_task_data(
-    monthly: pd.DataFrame,
-    economy: str,
-    task: str,
-    spec: dict | None,
-    horizon: int,
-    kind: str,
-) -> dict | None:
+@st.cache_resource(show_spinner=False)
+def arima_fit(economy: str, series_col: str, order: tuple, seasonal_order: tuple, mtime: float):
+    """Cached full-history ARIMA fit for the displayed forecast."""
+    series = get_monthly_complete(economy, mtime)[series_col].dropna()
+    return econometrics.fit_arima(series, order=order, seasonal_order=seasonal_order)
+
+
+@st.cache_resource(show_spinner=False)
+def garch_fit(economy: str, series_col: str, order: tuple, mtime: float):
+    """Cached full-history GARCH fit for the displayed volatility forecast."""
+    change = get_monthly_complete(economy, mtime)[series_col].diff().dropna()
+    return econometrics.fit_garch(change, p=order[0], q=order[1])
+
+
+def build_task_data(monthly: pd.DataFrame, economy: str, task: str, spec: dict | None, horizon: int) -> dict | None:
     """Assemble the leakage-guarded feature matrix and target for one run, or None."""
     if task == "classification":
-        policy = targets.CURATED_TARGETS.get(economy, {}).get("Policy rate", {})
-        target_column = policy.get("column")
-        extra_exclude = policy.get("extra_exclude", [])
+        spec = targets.CURATED_TARGETS.get(economy, {}).get("Policy rate")
         y = targets.direction_target(monthly, economy, horizon)
     else:
-        target_column = spec["column"] if spec else None
-        extra_exclude = spec.get("extra_exclude", []) if spec else []
-        y = targets.value_target(monthly, target_column, horizon, kind) if target_column else None
-    if y is None or target_column is None:
+        y = targets.value_target(monthly, spec["column"], horizon) if spec else None
+    if y is None or spec is None:
         return None
-    data = features.build_matrix(monthly, y, target_column, extra_exclude=extra_exclude, target_lags=TARGET_LAGS)
+    data = features.build_matrix(
+        monthly, y, spec["column"], extra_exclude=spec["extra_exclude"], target_lags=TARGET_LAGS
+    )
     if data is None:
         return None
-    data["target_column"] = target_column
+    data["target_column"] = spec["column"]
     return data
 
 
@@ -104,9 +114,9 @@ ENGINEERED_SUFFIX = ("_ret_", "_ma_", "_vol_", "_chg_")
 TARGET_LAGS = (1, 3, 6)
 
 
-def group_of(feature: str, target_column: str | None = None) -> str:
+def group_of(feature: str, target_column: str) -> str:
     """Map a modelling feature (including engineered children) to a business block."""
-    if target_column and feature.startswith(f"{target_column}_lag"):
+    if feature.startswith(f"{target_column}_lag"):
         return "Target lags"
     if feature.startswith(MACRO_RATE_COLUMNS):
         return "Macro"
@@ -174,7 +184,7 @@ def assemble_bundle(
     fresh run and a reload of saved artifacts.
     """
     split_preset, metric = cfg["split_preset"], cfg["metric"]
-    splits = pipeline.chronological_split(X, y, preset=split_preset)
+    splits = pipeline.chronological_split(X, y, preset=split_preset, gap=cfg["horizon"])
     if task == "classification":
         labels = list(range(len(classes)))
         code = {label: i for i, label in enumerate(classes)}
@@ -285,7 +295,6 @@ with tab_setup:
     task = "classification" if task_label.startswith("Direction") else "regression"
 
     spec = None
-    kind = "change"
     if task == "classification":
         cfg[1].selectbox("Target", ["Forward policy-rate decision"], disabled=True, key="mdl_dir_target")
         target_name = "Policy direction"
@@ -341,7 +350,7 @@ with tab_setup:
         st.markdown(interpret.MONTHLY_RATIONALE)
         st.markdown(interpret.CV_HELP)
 
-    data = build_task_data(monthly, economy, task, spec, horizon, kind)
+    data = build_task_data(monthly, economy, task, spec, horizon)
     if data is None:
         st.warning(
             "Could not build a modelling matrix for this configuration (missing target column "
@@ -381,8 +390,15 @@ with tab_setup:
             help=interpret.LEAKAGE_HELP,
         )
 
-        n_train = int(X.shape[0] * pipeline.SPLIT_PRESETS[split_preset][0])
+        n_train = int(X.shape[0] * pipeline.SPLIT_PRESETS[split_preset][0]) - horizon
         k_auto = pipeline.auto_k_features(n_train, X.shape[1])
+        st.caption(
+            f"Each row's outcome is only known {horizon} month(s) later, so the last {horizon} training "
+            "row(s) before the dev split and the last dev row(s) before the test split are dropped: their "
+            "labels would otherwise already contain the next split's outcomes. The same gap separates the "
+            "training and validation blocks inside cross-validation.",
+            help=interpret.SPLIT_HELP,
+        )
         st.caption(
             f"Not all {X.shape[1]} features reach a model. A one-feature-at-a-time F-test ranks them "
             f"by their association with the target, and only the top {k_auto} are kept. During "
@@ -397,7 +413,6 @@ current_sig = (
     task,
     target_name,
     horizon,
-    kind if task == "regression" else "",
     split_preset,
     metric,
     include_neural,
@@ -421,7 +436,6 @@ if (bundle is None or bundle["sig"] != current_sig) and X is not None and y is n
             "target_name": target_name,
             "target_column": target_column,
             "horizon": horizon,
-            "kind": kind,
             "split_preset": split_preset,
             "metric": metric,
             "trained_at": meta.get("trained_at"),
@@ -453,7 +467,7 @@ with tab_train:
         st.info("Complete the Setup tab first.")
     else:
         if st.button("Train / refit on current data", type="primary", key="mdl_train"):
-            splits = pipeline.chronological_split(X, y, preset=split_preset)
+            splits = pipeline.chronological_split(X, y, preset=split_preset, gap=horizon)
             if task == "classification":
                 train_classes = set(pd.Series(splits["Train"][1]).dropna().unique())
                 if train_classes != set(pd.Series(y).dropna().unique()):
@@ -508,6 +522,7 @@ with tab_train:
                 splits["Train"][1],
                 task,
                 budget=budget,
+                gap=horizon,
                 scoring=metric,
                 progress=sklearn_progress,
             )
@@ -531,10 +546,7 @@ with tab_train:
 
                 try:
                     fitted_neural = neural_mod.fit_neural_models(
-                        splits["Train"][0],
-                        y_train_enc,
-                        task,
-                        progress=neural_progress,
+                        splits["Train"][0], y_train_enc, task, history=data["X_all"], progress=neural_progress
                     )
                     models.update(fitted_neural)
                     neural_names = set(fitted_neural)
@@ -560,7 +572,6 @@ with tab_train:
                 "target_name": target_name,
                 "target_column": target_column,
                 "horizon": horizon,
-                "kind": kind,
                 "split_preset": split_preset,
                 "metric": metric,
             }
@@ -767,7 +778,7 @@ with tab_diag:
             else:
                 # Uniform thresholds make predict_with_thresholds a plain argmax - the
                 # same operating point the leaderboard scores use.
-                thresholds = {lab: 0.5 for lab in class_labels}
+                thresholds = dict.fromkeys(class_labels, 0.5)
             pred_show = evaluate.predict_with_thresholds(proba_show, thresholds, class_labels)
             metrics = evaluate.classification_metrics(y_show_str, pred_show, class_labels)
             auc = evaluate.roc_auc_macro_ovr(y_show_str, proba_show, class_labels)
@@ -920,7 +931,12 @@ with tab_diag:
                     st.session_state["mdl_diag_shap_class"] = class_labels[0]
                 chosen = st.selectbox("SHAP class", class_labels, key="mdl_diag_shap_class")
                 class_ix = class_labels.index(chosen)
-            shap_data = explain.tree_shap(model, X_test)
+
+            shap_cache = bundle.setdefault("shap_cache", {})
+            if model_name not in shap_cache:
+                shap_cache[model_name] = explain.tree_shap(model, X_test)
+            shap_data = shap_cache[model_name]
+
             summary = explain.shap_summary(shap_data, class_index=class_ix)
             show_figure(
                 plots.importance_bar(summary, title="Which features move predictions most (mean |SHAP|)"),
@@ -1191,7 +1207,7 @@ with tab_forecast:
         )
     numeric = monthly_fc.select_dtypes("number")
     series_options = sorted(c for c in numeric.columns if not any(s in c for s in ENGINEERED_SUFFIX))
-    policy_col = targets.CURATED_TARGETS.get(economy, {}).get("Policy rate", {}).get("column")
+    policy_col = targets.policy_rate_column(economy)
     default_series = series_options.index(policy_col) if policy_col in series_options else 0
     st.session_state.setdefault("mdl_fc_steps", 12)
     steps = st.slider(
@@ -1200,8 +1216,8 @@ with tab_forecast:
         24,
         key="mdl_fc_steps",
         help="How many months ahead these time-series models project. Independent of the Setup horizon. "
-        "Moving it never refits anything - orders and fits are estimated once on the full series and "
-        "cached; the slider only changes how many months are projected from the same fit.",
+        "Moving it never refits anything: orders are chosen once on the pre-holdout history and the fits "
+        "are cached; the slider only changes how many months are projected.",
     )
 
     arima_tab, garch_tab = st.tabs(["ARIMA / SARIMA", "GARCH volatility"])
@@ -1230,10 +1246,14 @@ with tab_forecast:
             best_order = tuple(int(v) for v in search["best"])
             best_seasonal = tuple(int(v) for v in search["best_seasonal"])
             picked = f"SARIMA{best_order}x{best_seasonal}" if best_seasonal[3] else f"ARIMA{best_order}"
-            st.caption(f"Automatic order (lowest {search['ic'].upper()}): {picked}. Candidates:")
+            cutoff = series.index[-FORECAST_HOLDOUT - 1]
+            st.caption(
+                f"Automatic order (lowest {search['ic'].upper()}, chosen on history to {cutoff:%b %Y}): "
+                f"{picked}. Candidates:"
+            )
             board = search["leaderboard"].copy()
             board["Order"] = board["Order"].map(str)
-            board["Seasonal"] = board["Seasonal"].map(lambda s: str(s) if s[3] else "—")
+            board["Seasonal"] = board["Seasonal"].map(lambda s: str(s) if s[3] else "-")
             board["Ljung-Box p"] = board["Ljung-Box p"].map(interpret.format_pvalue)
             st.dataframe(board, hide_index=True, width="stretch")
 
@@ -1269,7 +1289,7 @@ with tab_forecast:
         else:
             chosen_order, seasonal_order = best_order, best_seasonal
 
-        res = econometrics.fit_arima(series, order=chosen_order, seasonal_order=seasonal_order)
+        res = arima_fit(economy, series_col, chosen_order, seasonal_order, mtime)
         if res is None:
             st.info("The ARIMA fit needs at least 20 observations and a valid order.")
         else:
@@ -1284,11 +1304,11 @@ with tab_forecast:
             st.caption(interpret.ljung_box_verdict(diag))
             if acc is not None:
                 st.caption(
-                    f"The forecast below is fit on the full history - there is no held-out data behind it. "
-                    f"To measure accuracy honestly, the same specification was refit without the last "
-                    f"{acc['holdout']} months and made to forecast them: that gives the holdout RMSE/MAE "
-                    f"above (in the series' own units), versus in-sample one-step errors of "
-                    f"{acc['train_rmse']:,.3f} / {acc['train_mae']:,.3f}."
+                    f"The order above was chosen, and this specification fit, on data ending {acc['holdout']} "
+                    "months before the last observation; forecasting those months gives the holdout RMSE/MAE "
+                    f"above (series' own units), versus in-sample one-step errors of {acc['train_rmse']:,.3f} / "
+                    f"{acc['train_mae']:,.3f}. The forecast below then refits the same specification on the "
+                    "full history - there is no held-out data behind that fit."
                 )
             fc_index = pd.date_range(series.index[-1] + pd.offsets.MonthEnd(1), periods=steps, freq="ME")
             fc = {
@@ -1316,11 +1336,14 @@ with tab_forecast:
             best_pq = (1, 1)
         else:
             best_pq = tuple(int(v) for v in gsearch["best"])
-            st.caption(f"Automatic order (lowest {gsearch['ic'].upper()}): GARCH{best_pq}. Candidates:")
+            st.caption(
+                f"Automatic order (lowest {gsearch['ic'].upper()}, chosen on the pre-holdout history): "
+                f"GARCH{best_pq}. Candidates:"
+            )
             gboard = gsearch["leaderboard"].copy()
             gboard["Order"] = gboard["Order"].map(str)
             st.dataframe(gboard, hide_index=True, width="stretch")
-        res = econometrics.fit_garch(change, p=best_pq[0], q=best_pq[1])
+        res = garch_fit(economy, garch_col, best_pq, mtime)
         if res is None:
             st.info("GARCH needs at least 50 monthly changes for this series.")
         else:
@@ -1336,10 +1359,10 @@ with tab_forecast:
             st.caption(interpret.garch_persistence_note(fc["persistence"]))
             if gacc is not None:
                 st.caption(
-                    f"Accuracy check: the displayed model is fit on the full history, so the same "
-                    f"specification was refit without the last {gacc['holdout']} months; its volatility "
-                    f"forecast missed the realized absolute changes by RMSE {gacc['rmse']:,.3f} / MAE "
-                    f"{gacc['mae']:,.3f}."
+                    f"Accuracy check: the order was chosen and the model fit without the last {gacc['holdout']} "
+                    f"months; its volatility forecast missed the realized absolute changes by RMSE "
+                    f"{gacc['rmse']:,.3f} / MAE {gacc['mae']:,.3f}. The displayed model refits that order on "
+                    "the full history."
                 )
             close = {**fc, "fitted_volatility": fc["fitted_volatility"].iloc[-12:]}
             show_figure(

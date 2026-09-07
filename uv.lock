@@ -524,7 +524,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1,<2" },
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "scikit-learn", specifier = ">=1.6.1,<1.8" },
-    { name = "scipy", specifier = ">=1.13,<2" },
+    { name = "scipy", specifier = ">=1.17,<2" },
     { name = "shap", specifier = ">=0.48,<0.50" },
     { name = "statsmodels", specifier = ">=0.14.4,<0.15" },
     { name = "streamlit", specifier = ">=1.51,<2" },

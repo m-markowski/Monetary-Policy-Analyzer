@@ -4,6 +4,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+
 from config.settings import PROJECT_ROOT
 
 MODELS_DIR = PROJECT_ROOT / "data" / "models"

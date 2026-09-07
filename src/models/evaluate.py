@@ -300,7 +300,7 @@ def naive_baseline_rows(splits, task, labels=None, momentum=None) -> pd.DataFram
     """
     if task == "regression":
         row = {"Model": "Baseline: no change"}
-        for split_name, (X, y) in splits.items():
+        for split_name, (_, y) in splits.items():
             for metric, value in regression_metrics(y, np.zeros(len(y))).items():
                 row[f"{split_name} {metric}"] = value
         return pd.DataFrame([row]).set_index("Model")

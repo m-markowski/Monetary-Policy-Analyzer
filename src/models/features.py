@@ -64,9 +64,9 @@ def build_matrix(
         min_rows (int): Minimum complete rows required to return a usable matrix.
 
     Returns:
-        dict | None: 'X' (dates x features), 'y' (aligned target) and 'X_latest'
-        (the most recent complete feature row, possibly unlabelled), or None if
-        fewer than `min_rows` complete rows remain.
+        dict | None: 'X' (dates x features), 'y' (aligned target), 'X_all'
+        (every feature-complete row, labelled or not - the LSTM's look-back context) and
+        'X_latest' (its last row, the live scenario anchor).
     """
     exclude = set(leakage_columns(list(monthly.columns), target_column))
     if extra_exclude:
@@ -89,4 +89,4 @@ def build_matrix(
     # The last complete feature row may be newer than the last labelled row (the
     # forward target is unknown for the final `horizon` months); it is the natural
     # anchor for a live scenario prediction.
-    return {"X": combined, "y": target, "X_latest": complete.iloc[[-1]]}
+    return {"X": combined, "y": target, "X_all": complete, "X_latest": complete.iloc[[-1]]}

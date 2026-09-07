@@ -11,7 +11,7 @@ ENV_PATH = PROJECT_ROOT / "config" / ".env"
 
 load_dotenv(dotenv_path=ENV_PATH)
 
-with open(YAML_PATH, "r") as f:
+with open(YAML_PATH) as f:
     SEED = int(yaml.safe_load(f).get("modeling", {}).get("seed", 2026))
 
 
@@ -41,7 +41,7 @@ class EconomyConfig:
             FileNotFoundError: If the YAML configuration file cannot be found.
         """
         self.economy = economy.lower()
-        with open(YAML_PATH, "r") as f:
+        with open(YAML_PATH) as f:
             config = yaml.safe_load(f)
         self.features = config["features"]
         self.staleness_tolerance = config.get("staleness_tolerance_days", {})

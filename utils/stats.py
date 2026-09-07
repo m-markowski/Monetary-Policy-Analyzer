@@ -49,9 +49,9 @@ def normality_battery(series: pd.Series, alpha: float = 0.05) -> pd.DataFrame | 
     """
     Run several normality tests and report them side by side.
 
-    Jarque-Bera, Lilliefors and Anderson-Darling always run; Shapiro-Wilk is
-    skipped above 5000 points, where its p-value is unreliable. Anderson-Darling
-    has no p-value, so its verdict comes from the critical value at `alpha`.
+    Jarque-Bera, Lilliefors and Anderson-Darling always run; Shapiro-Wilk is skipped above 5000 points,
+    where its p-value is unreliable. The Anderson-Darling p-value is interpolated from SciPy's critical-value
+    tables, so it is capped at 0.15."
 
     Args:
         series (pd.Series): Numeric variable to test.
@@ -67,13 +67,12 @@ def normality_battery(series: pd.Series, alpha: float = 0.05) -> pd.DataFrame | 
 
     jb = stats.jarque_bera(values)
     ll_stat, ll_p = lilliefors(values, dist="norm")
-    ad = stats.anderson(values, dist="norm")
-    ad_crit = ad.critical_values[int(np.argmin(np.abs(ad.significance_level - alpha * 100)))]
+    ad = stats.anderson(values, dist="norm", method="interpolate")
 
     rows = [
         ("Jarque-Bera", jb.statistic, jb.pvalue, jb.pvalue > alpha),
         ("Lilliefors", ll_stat, ll_p, ll_p > alpha),
-        ("Anderson-Darling", ad.statistic, np.nan, ad.statistic < ad_crit),
+        ("Anderson-Darling", ad.statistic, ad.pvalue, ad.pvalue > alpha),
     ]
     if values.size <= 5000:
         sw = stats.shapiro(values)
@@ -274,7 +273,8 @@ def variance_inflation_factors(df: pd.DataFrame, columns: list[str] | None = Non
         return None
     # np.ones  - constant column at index 0. The loop starts at 1
     design = np.column_stack([np.ones(len(numeric)), numeric.to_numpy()])
-    vifs = [variance_inflation_factor(design, i) for i in range(1, design.shape[1])]
+    with np.errstate(divide="ignore"):  # exact collinearity legitimately yields inf
+        vifs = [variance_inflation_factor(design, i) for i in range(1, design.shape[1])]
     return pd.Series(vifs, index=numeric.columns, name="VIF").sort_values(ascending=False)
 
 

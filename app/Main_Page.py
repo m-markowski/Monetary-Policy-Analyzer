@@ -1,7 +1,6 @@
-import warnings
-
 import pandas as pd
 import streamlit as st
+
 from src.dataset_builder import (
     ECONOMIES,
     build_and_save,
@@ -10,13 +9,6 @@ from src.dataset_builder import (
     load_metadata,
     master_mtime,
     save_metadata,
-)
-
-# Silence NumPy "divide by zero encountered in scalar divide" (appears when VIF hits inf)
-warnings.filterwarnings(
-    "ignore",
-    message="divide by zero encountered in scalar divide",
-    category=RuntimeWarning,
 )
 
 st.set_page_config(page_title="Monetary Policy Analyzer", layout="wide")
@@ -108,7 +100,7 @@ if reload_clicked:
     metas = {}
     with st.status("Fetching from FRED + yfinance...", expanded=True) as status:
         for eco in ECONOMIES:
-            st.write(f"Building {eco.upper()} dataset…")
+            st.write(f"Building {eco.upper()} dataset...")
             metas[eco] = build_and_save(eco, full_refresh=full_refresh)
             m = metas[eco]
             st.write(
