@@ -83,7 +83,7 @@ def pca_summary(scaled: pd.DataFrame, n_components: int | None = None) -> dict |
         dict | None: 'scores' (dates x PC), 'explained_variance_ratio' (per PC), and
         'loadings' (feature x PC); None if fewer than two features.
     """
-    if scaled.shape[1] < 2:
+    if scaled.shape[1] < 2 or scaled.shape[0] < 2:
         return None
     max_k = min(scaled.shape[0] - 1, scaled.shape[1])  # (min of rows - 1 and feature count)
     k = max_k if n_components is None else min(n_components, max_k)
@@ -117,7 +117,7 @@ def kmeans_sweep(scaled: pd.DataFrame, k_min: int = 2, k_max: int = 8, random_st
         indexed by k; None if there are too few rows for the range.
     """
     data = scaled.to_numpy()
-    top = min(k_max, data.shape[0] - 1)
+    top = min(k_max, data.shape[0] - 1, len(np.unique(data, axis=0)))
     if top < k_min:
         return None
 
@@ -153,7 +153,7 @@ def kmeans_labels(scaled: pd.DataFrame, k: int, random_state: int = 0) -> dict |
          None if k is invalid for the sample.
     """
     data = scaled.to_numpy()
-    if not 2 <= k <= data.shape[0] - 1:
+    if not 2 <= k <= min(data.shape[0] - 1, len(np.unique(data, axis=0))):
         return None
 
     model = KMeans(n_clusters=k, random_state=random_state, n_init=10)

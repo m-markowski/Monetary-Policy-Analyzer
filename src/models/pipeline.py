@@ -144,7 +144,7 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
                 "needs_scaling": False,
             },
             "Random forest": {
-                "estimator": RandomForestRegressor(random_state=random_state, n_jobs=-1),
+                "estimator": RandomForestRegressor(random_state=random_state, n_jobs=1),
                 "space": {
                     "model__n_estimators": ("int", 100, 600),
                     "model__max_depth": ("int", 3, 16),
@@ -163,7 +163,7 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
                 "needs_scaling": False,
             },
             "XGBoost": {
-                "estimator": XGBRegressor(random_state=random_state, tree_method="hist", verbosity=0),
+                "estimator": XGBRegressor(random_state=random_state, tree_method="hist", verbosity=0, n_jobs=1),
                 "space": {
                     "model__n_estimators": ("int", 100, 600),
                     "model__max_depth": ("int", 2, 8),
@@ -174,7 +174,7 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
                 "needs_scaling": False,
             },
             "LightGBM": {
-                "estimator": LGBMRegressor(random_state=random_state, verbose=-1),
+                "estimator": LGBMRegressor(random_state=random_state, verbose=-1, n_jobs=1),
                 "space": {
                     "model__n_estimators": ("int", 100, 600),
                     "model__num_leaves": ("int", 15, 63),
@@ -212,7 +212,7 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
             "needs_scaling": False,
         },
         "Random forest": {
-            "estimator": RandomForestClassifier(class_weight=cw, random_state=random_state, n_jobs=-1),
+            "estimator": RandomForestClassifier(class_weight=cw, random_state=random_state, n_jobs=1),
             "space": {
                 "model__n_estimators": ("int", 100, 600),
                 "model__max_depth": ("int", 3, 16),
@@ -232,7 +232,7 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
         },
         "XGBoost": {
             "estimator": XGBClassifier(
-                random_state=random_state, tree_method="hist", verbosity=0, eval_metric="mlogloss"
+                random_state=random_state, tree_method="hist", verbosity=0, eval_metric="mlogloss", n_jobs=1
             ),
             "space": {
                 "model__n_estimators": ("int", 100, 600),
@@ -244,7 +244,7 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
             "needs_scaling": False,
         },
         "LightGBM": {
-            "estimator": LGBMClassifier(class_weight=cw, random_state=random_state, verbose=-1),
+            "estimator": LGBMClassifier(class_weight=cw, random_state=random_state, verbose=-1, n_jobs=1),
             "space": {
                 "model__n_estimators": ("int", 100, 600),
                 "model__num_leaves": ("int", 15, 63),
@@ -290,24 +290,19 @@ def build_pipeline(
     return pipe
 
 
-def auto_k_features(n_rows: int, n_features: int, n_splits: int = 5) -> int:
+def auto_k_features(n_rows: int, n_features: int, n_splits: int = 5, gap: int = 0) -> int:
+    """Bound feature count by the smallest planned expanding training fold.
+
+    The five-feature floor is a heuristic, capped by the available columns.
+    The gap is excluded from the fold's training rows.
     """
-    Size the SelectKBest k to the smallest expanding CV fold.
-
-    The earliest TimeSeriesSplit fold trains on ~n_rows/(n_splits+1) rows; keeping
-    about 4 training rows per feature keeps even that fold well-conditioned and the
-    CV score stable.
-
-    Args:
-        n_rows (int): Number of training rows.
-        n_features (int): Number of candidate features.
-        n_splits (int): Number of TimeSeriesSplit folds.
-
-    Returns:
-        int: Number of features to keep (at least 5, at most n_features).
-    """
-    smallest_fold = n_rows // (n_splits + 1)
-    return max(5, min(n_features, smallest_fold // 4))
+    if n_features < 1 or n_splits < 2 or gap < 0:
+        raise ValueError("Expected features > 0, n_splits >= 2 and gap >= 0.")
+    test_size = n_rows // (n_splits + 1)
+    smallest_fold = n_rows - n_splits * test_size - gap
+    if test_size < 1 or smallest_fold < 1:
+        raise ValueError("Not enough rows for the requested folds and gap.")
+    return min(n_features, max(5, smallest_fold // 4))
 
 
 def chronological_split(X: pd.DataFrame, y: pd.Series, preset: str = "70/15/15", gap: int = 0) -> dict:
@@ -327,11 +322,17 @@ def chronological_split(X: pd.DataFrame, y: pd.Series, preset: str = "70/15/15",
     Returns:
         dict: 'Train'/'Valid'/'Test' -> (X_slice, y_slice), preserving order.
     """
+    if not isinstance(gap, int) or isinstance(gap, bool) or gap < 0:
+        raise ValueError("gap must be a non-negative integer.")
+    if not X.index.equals(y.index) or not X.index.is_monotonic_increasing or not X.index.is_unique:
+        raise ValueError("X and y must have the same unique, increasing date index.")
     train_frac, valid_frac = SPLIT_PRESETS[preset]
     n = len(X)
     valid_start = int(n * train_frac)
     test_start = valid_start + int(n * valid_frac)
     bounds = {"Train": (0, valid_start - gap), "Valid": (valid_start, test_start - gap), "Test": (test_start, n)}
+    if any(hi <= lo for lo, hi in bounds.values()):
+        raise ValueError("The split and horizon leave an empty training, validation or test set.")
     return {name: (X.iloc[lo:hi], y.iloc[lo:hi]) for name, (lo, hi) in bounds.items()}
 
 
@@ -346,8 +347,8 @@ def search_estimator(pipe, space, X, y, scoring, cv, budget, random_state=SEED):
         pipe (Pipeline): Pipeline to tune.
         space (dict): Parameter space (see `to_sklearn_distributions`).
         X, y: Training data (the train split only, never valid/test).
-        scoring (str): sklearn scoring string (from CV_SCORING).
-        cv: Cross-validation splitter (TimeSeriesSplit).
+        scoring: sklearn scoring string or callable from CV_SCORING.
+        cv: The shared list of usable expanding train/validation index pairs.
         budget (str): One of BUDGET_TIERS.
         random_state (int): Seed for the search.
 
@@ -368,7 +369,7 @@ def search_estimator(pipe, space, X, y, scoring, cv, budget, random_state=SEED):
             scoring=scoring,
             cv=cv,
             random_state=random_state,
-            n_jobs=-1,
+            n_jobs=4,
             refit=True,
         )
         with parallel_config(backend="threading"):
@@ -385,6 +386,30 @@ def search_estimator(pipe, space, X, y, scoring, cv, budget, random_state=SEED):
     study.optimize(objective, n_trials=cfg["n_trials"])
     best = clone(pipe).set_params(**study.best_params).fit(X, y)
     return best, study.best_params, float(study.best_value)
+
+
+def usable_time_folds(X, y, task: str, scoring: str, n_splits: int = 5, gap: int = 0) -> tuple[list, int]:
+    """Return expanding folds usable by the whole roster, without moving dates.
+
+    Classification folds must train on every class present in the outer training
+    data. ROC-AUC additionally requires at least two validation classes. Skipped
+    folds are reported; undefined scores are never replaced with chance scores.
+    """
+    classes = set(np.asarray(y))
+    folds = []
+    for train, valid in TimeSeriesSplit(n_splits=n_splits, gap=gap).split(X):
+        if task == "classification":
+            if set(np.asarray(y)[train]) != classes or len(classes) < 2:
+                continue
+            if scoring == "ROC-AUC (macro/OvR)" and len(np.unique(np.asarray(y)[valid])) < 2:
+                continue
+        folds.append((train, valid))
+    if len(folds) < 2:
+        raise ValueError(
+            "Fewer than two usable expanding CV folds remain. Choose another horizon, "
+            "split preset or metric; no random splitting or synthetic AUC is used."
+        )
+    return folds, n_splits - len(folds)
 
 
 def train_roster(
@@ -431,10 +456,10 @@ def train_roster(
     """
     scoring = scoring or DEFAULT_SCORING[task]
     scorer = CV_SCORING[scoring]
-    cv = TimeSeriesSplit(n_splits=n_splits, gap=gap)
+    cv, skipped_folds = usable_time_folds(X, y, task, scoring, n_splits, gap)
 
     if k_features == "auto":
-        k_features = auto_k_features(len(X), X.shape[1], n_splits)
+        k_features = auto_k_features(len(X), X.shape[1], n_splits, gap=gap)
 
     classes, encoder = None, None
     if task == "classification":
@@ -458,6 +483,8 @@ def train_roster(
     best = max(cv_scores, key=cv_scores.get) if cv_scores else None
     return {
         "models": fitted,
+        "cv_folds": len(cv),
+        "skipped_folds": skipped_folds,
         "cv_scores": cv_scores,
         "params": params,
         "scoring": scoring,

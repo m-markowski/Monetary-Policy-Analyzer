@@ -46,10 +46,10 @@ CURATED_TARGETS = {
             "extra_exclude": ["sprd_10y_ecb", "psprd_ib_3m_ecb"],
             "purpose": "Where is the ECB heading - the forward rate call as a number",
         },
-        "HICP inflation": {
+        "HICP price index": {
             "column": "hicp_all",
             "extra_exclude": [],
-            "purpose": "Will euro-area inflation build or fade - HICP is the variable the ECB's mandate is written in.",
+            "purpose": "How will the HICP price index change? The forecast is in index points, not an inflation rate.",
         },
         "Real GDP": {
             "column": "gdp_real",

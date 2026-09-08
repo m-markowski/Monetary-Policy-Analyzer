@@ -100,7 +100,7 @@ def family_of(column: str) -> str:
     """Map a base column to its display family for the variable picker."""
     if column.startswith(("rate_", "yld_")):
         return "Rates & yields"
-    if column.startswith("sprd_"):
+    if column.startswith(("sprd_", "psprd_")):
         return "Spreads"
     return "Macro & market levels"
 
@@ -114,16 +114,17 @@ def variables_by_family(df: pd.DataFrame) -> dict[str, list[str]]:
     return {fam: sorted(cols) for fam, cols in groups.items()}
 
 
-def allowed_transforms(family: str) -> list[str]:
-    """Transforms valid for a family; rates/spreads expose differencing only."""
-    if family in LEVELS_ONLY:
+def allowed_transforms(family: str, column: str | None = None) -> list[str]:
+    """Do not take log returns of percentage rates, spreads or signed indicators."""
+    no_log = {"cpi_sticky_core", "exp_infl_mich", "ind_fin_conditions", "gov_balance", "ind_sahm_realtime"}
+    if family in LEVELS_ONLY or column in no_log:
         return ["Level", "First difference"]
     return ["Level", "Log return (%)", "First difference"]
 
 
 def collapse_to_monthly(series: pd.Series) -> pd.Series:
     """
-    Down-sample to one value per month so tests see near-independent observations.
+    Sample one value per month, reducing daily duplication but not serial dependence.
 
     The master data is daily with low-frequency macro series forward-filled and
     policy rates held as step functions, so consecutive daily rows are largely
@@ -226,10 +227,11 @@ def prepare_frame(
         pd.DataFrame: Transformed, sliced, missing-dropped frame.
     """
     start, end = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
-    frame = source.loc[(source.index >= start) & (source.index <= end), columns]
+    frame = source.loc[:, columns]
     if monthly:
         frame = frame.resample("ME").last()
-    return frame.apply(lambda s: apply_transform(s, transform)).dropna()
+    frame = frame.apply(lambda s: apply_transform(s, transform))
+    return frame.loc[(frame.index >= start) & (frame.index <= end)].dropna()
 
 
 def freeze_corr_selection() -> None:
@@ -265,11 +267,13 @@ def representative_features(corr: pd.DataFrame, k: int = 8) -> list[str]:
     if abs_corr.shape[1] <= k:
         return list(corr.columns)
 
-    chosen = [abs_corr.mean().idxmax()]
+    means = abs_corr.mean().dropna()
+    chosen = [means.idxmax() if not means.empty else abs_corr.columns[0]]
     while len(chosen) < k:
         remaining = [c for c in abs_corr.columns if c not in chosen]
         max_to_chosen = abs_corr.loc[remaining, chosen].max(axis=1)
-        chosen.append(max_to_chosen.idxmin())
+        defined = max_to_chosen.dropna()
+        chosen.append(defined.idxmin() if not defined.empty else remaining[0])
     return chosen
 
 
@@ -375,7 +379,7 @@ with tab_overview:
             levels_df = pd.DataFrame({c: prepare_series(df[c], "Level", monthly, date_range) for c in chart_features})
             returns_df = pd.DataFrame()
             for c in chart_features:
-                if "Log return (%)" in allowed_transforms(family_of(c)):
+                if "Log return (%)" in allowed_transforms(family_of(c), c):
                     returns_df[c] = prepare_series(df[c], "Log return (%)", monthly, date_range)
                 else:
                     st.info(
@@ -397,7 +401,7 @@ with tab_dist:
     if st.session_state.get("dist_variable") not in base_columns:
         st.session_state["dist_variable"] = default_var if default_var in base_columns else base_columns[0]
     variable = ctrl[0].selectbox("Variable", base_columns, key="dist_variable")
-    transforms = allowed_transforms(family_of(variable))
+    transforms = allowed_transforms(family_of(variable), variable)
     if st.session_state.get("dist_transform") not in transforms:
         st.session_state["dist_transform"] = "Level"
     transform = ctrl[1].selectbox("Transform", transforms, key="dist_transform")
@@ -725,7 +729,7 @@ with tab_regime:
         if st.session_state.get("regime_variable") not in base_columns:
             st.session_state["regime_variable"] = default_var if default_var in base_columns else base_columns[0]
         cmp_var = ctrl[0].selectbox("Variable", base_columns, key="regime_variable")
-        cmp_transforms = allowed_transforms(family_of(cmp_var))
+        cmp_transforms = allowed_transforms(family_of(cmp_var), cmp_var)
         if st.session_state.get("regime_transform") not in cmp_transforms:
             st.session_state["regime_transform"] = "Level"
         cmp_transform = ctrl[1].selectbox("Transform", cmp_transforms, key="regime_transform")

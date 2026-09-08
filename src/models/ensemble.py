@@ -159,8 +159,10 @@ def build_ensembles(
 
     weights = blend_weights(models, X_valid, y_valid, task, labels=labels)
     n_classes = len(labels) if labels is not None else None
-    ensembles = {
-        "Blend": BlendEnsemble(models, weights, task),
-        "Stack": build_stack(models, X_valid, y_valid, task, n_classes=n_classes, random_state=random_state),
-    }
-    return {"ensembles": ensembles, "weights": weights, "members": list(models)}
+    ensembles = {"Blend": BlendEnsemble(models, weights, task)}
+    skip_reason = None
+    if task == "classification" and len(np.unique(y_valid)) < 2:
+        skip_reason = "Stack omitted: the Dev split contains only one class."
+    else:
+        ensembles["Stack"] = build_stack(models, X_valid, y_valid, task, n_classes=n_classes, random_state=random_state)
+    return {"ensembles": ensembles, "weights": weights, "members": list(models), "skip_reason": skip_reason}

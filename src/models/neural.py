@@ -130,18 +130,24 @@ class KerasEstimator:
         )
         return windows[context.index.get_indexer(X.index)]
 
-    def fit(self, X: pd.DataFrame, y, history: pd.DataFrame | None = None):
+    def fit(self, X: pd.DataFrame, y, history: pd.DataFrame | None = None, *, gap: int = 0):
+        """Fit on the first 80%, purging the horizon before inner validation.
+
+        Scaling and class weights use only the inner training block. Feature-only
+        history supplies causal sequence context; it never supplies training labels.
+        """
         import keras
 
+        if not isinstance(gap, int) or gap < 0:
+            raise ValueError("gap must be a non-negative integer.")
+        valid_start = int(len(X) * 0.8)
+        fit_end = valid_start - gap
+        if fit_end < 2 or len(X) - valid_start < 2:
+            raise ValueError("Not enough rows for neural training, gap and validation.")
         keras.utils.set_random_seed(self.random_state)
-        # Seeds the Python/NumPy/TF RNGs. GPU kernels and some parallel ops stay
-        # nondeterministic, so neural runs are close but not bit-identical.
-        # The scaler sees training rows only; history supplies earlier feature rows
-        # for the LSTM windows and carries no labels.
         self.history_ = X if history is None else history
-        self.scaler_ = StandardScaler().fit(np.asarray(X, dtype=float))
+        self.scaler_ = StandardScaler().fit(X.iloc[:fit_end].to_numpy(dtype=float))
         prepared = self.transform_inputs(X)
-        input_shape = prepared.shape[1:]
 
         weights = None
         if self.task == "classification":
@@ -149,23 +155,24 @@ class KerasEstimator:
             n_outputs = len(self.classes_)
             target = np.searchsorted(self.classes_, y)
             if self.class_weight:
-                balanced = compute_class_weight("balanced", classes=self.classes_, y=np.asarray(y))
-                weights = dict(enumerate(balanced))
+                present = np.unique(target[:fit_end])
+                balanced = compute_class_weight("balanced", classes=present, y=target[:fit_end])
+                weights = dict(zip(present.tolist(), balanced.tolist(), strict=True))
         else:
             n_outputs = 1
             target = np.asarray(y, dtype=float)
 
         self.model_ = build_network(
-            self.kind, input_shape, n_outputs, self.task, self.units, self.dropout, self.l2, self.learning_rate
+            self.kind, prepared.shape[1:], n_outputs, self.task, self.units, self.dropout, self.l2, self.learning_rate
         )
         callbacks = [
             keras.callbacks.EarlyStopping(patience=25, restore_best_weights=True),
             keras.callbacks.ReduceLROnPlateau(patience=10, factor=0.5, min_lr=1e-5),
         ]
         self.model_.fit(
-            prepared,
-            target,
-            validation_split=0.2,
+            prepared[:fit_end],
+            target[:fit_end],
+            validation_data=(prepared[valid_start:], target[valid_start:]),
             epochs=self.epochs,
             batch_size=self.batch_size,
             callbacks=callbacks,
@@ -231,6 +238,7 @@ def fit_neural_models(
     task: str,
     *,
     history: pd.DataFrame,
+    gap: int = 0,
     lookback: int = 6,
     class_weight: bool = True,
     random_state: int = SEED,
@@ -249,6 +257,7 @@ def fit_neural_models(
         task (str): 'regression' or 'classification'.
         history (pd.DataFrame): Every feature-complete month (labelled or not),
             date-indexed; the LSTM builds each row's window from the months preceding it.
+        gap (int): Target-horizon rows purged before inner validation.
         lookback (int): Window length for the sequence models.
         class_weight (bool): Balance classes during training (classification).
         random_state (int): Seed.
@@ -262,7 +271,7 @@ def fit_neural_models(
     fitted = {}
     total = len(roster)
     for done, (name, estimator) in enumerate(roster.items(), start=1):
-        estimator.fit(X, y, history=history)
+        estimator.fit(X, y, history=history, gap=gap)
         fitted[name] = estimator
         if progress:
             progress(done, total, name, None)

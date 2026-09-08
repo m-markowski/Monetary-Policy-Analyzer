@@ -98,10 +98,10 @@ class EconomyDataLoader:
         """
         info = self.get_series_metadata(series_id)
         if info is None:
-            return True, "metadata unavailable"
+            raise RuntimeError(f"Could not read metadata for {series_id}; the cache was not refreshed.")
         obs_end = info.get("observation_end")
         if obs_end is None or pd.isna(obs_end):
-            return True, "no observation_end"
+            raise RuntimeError(f"Missing observation_end for {series_id}; freshness is unknown.")
         freq_short = (info.get("frequency_short") or "").upper()
         freq = self.FREQ_MAP.get(freq_short, "monthly")
         tolerance = self.staleness_tolerance.get(freq, 90)
@@ -158,7 +158,7 @@ class EconomyDataLoader:
         """
         last = self.get_ticker_last_quote(ticker)
         if last is None:
-            return True, "no quotes returned by yfinance"
+            raise RuntimeError(f"No quote information for {ticker}; freshness is unknown.")
         tolerance = self.staleness_tolerance.get("daily", 10)
         age_days = (pd.Timestamp.today().normalize() - last).days
         if age_days > tolerance:
@@ -283,7 +283,7 @@ class EconomyDataLoader:
         if not results:
             return pd.DataFrame()
 
-        df = pd.DataFrame(results)
+        df = pd.DataFrame({series_id: results[series_id] for series_id in all_series if series_id in results})
         df.index.name = "date"
         return df.reset_index()
 
@@ -337,6 +337,10 @@ class EconomyDataLoader:
 
         fred_df = self.fetch_all_fred_data(start_date=start_date, end_date=end_date)
         market_df = self.fetch_market_data(start_date=start_date, end_date=end_date)
+        expected = {raw_id for raw_id, _ in self.fred_config["rates"] + self.fred_config["other"] + self.market_tickers}
+        missing = expected - set(fred_df.columns) - set(market_df.columns)
+        if missing:
+            raise RuntimeError(f"Incomplete download ({', '.join(sorted(missing))}); retaining the existing cache.")
 
         if not fred_df.empty and not market_df.empty:
             df = pd.merge(fred_df, market_df, on="date", how="outer")
@@ -356,7 +360,8 @@ class EconomyDataLoader:
         # Forward fill macro data if there are gaps
         df[fred_cols] = df[fred_cols].ffill()
         # Drop rows where market data is missing (non-trading days)
-        df = df.dropna(subset=market_cols, how="all")
+        if market_cols:
+            df = df.dropna(subset=market_cols, how="all")
         # Forward fill market data if there are gaps on days such as July 4th
         df[market_cols] = df[market_cols].ffill()
         # Drop any remaining NaNs
@@ -417,7 +422,7 @@ class EconomyDataLoader:
         Returns:
             pd.DataFrame: DataFrame with engineered features.
         """
-        all_cols = list(set(all_cols))
+        all_cols = list(dict.fromkeys(all_cols))
         freq_classification = self.classify_all_frequencies(cols=all_cols)
 
         # Process daily data with returns, volatility, and moving averages
@@ -434,12 +439,9 @@ class EconomyDataLoader:
                 df[f"{col}_ma_{window}d"] = df[col].rolling(window).mean()
 
             returns = df[col].pct_change()
-            if returns.std() > 0.0005:  # Threshold to avoid computing on near-constant series
-                families["vol"] = [f"{w}d" for w in self.features["daily_volatility_windows"]]
-                for window in self.features["daily_volatility_windows"]:
-                    df[f"{col}_vol_{window}d"] = returns.rolling(window).std()
-            else:
-                self.skipped_features.append({"feature": f"{col}_vol_*", "reason": "near-constant series (std ~ 0)"})
+            families["vol"] = [f"{w}d" for w in self.features["daily_volatility_windows"]]
+            for window in self.features["daily_volatility_windows"]:
+                df[f"{col}_vol_{window}d"] = returns.rolling(window).std()
             self.feature_manifest.append({"base": col, "frequency": "daily", "families": families})
 
         # Process weekly, monthly, and quarterly data with period-based changes.
@@ -450,10 +452,14 @@ class EconomyDataLoader:
             for col in freq_classification[freq_name + "ly"]:
                 if col not in df.columns:
                     continue
-                # Get last non-null observation per period
+                # Only completed earlier periods supply the reference value.
                 period_data = df.groupby(period_index)[col].last()
                 for periods, label in self.features[f"{freq_name}ly_periods"]:
-                    changes[f"{col}_chg_{label}"] = period_index.map(period_data.pct_change(periods))
+                    previous = period_index.map(period_data.shift(periods))
+                    if col in {"gov_balance", "ind_fin_conditions"}:
+                        changes[f"{col}_chg_{label}"] = df[col] - previous
+                    else:
+                        changes[f"{col}_chg_{label}"] = df[col].div(previous).sub(1)
                 labels = [label for _, label in self.features[f"{freq_name}ly_periods"]]
                 self.feature_manifest.append({"base": col, "frequency": f"{freq_name}ly", "families": {"chg": labels}})
             if changes:

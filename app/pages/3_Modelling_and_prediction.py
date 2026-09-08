@@ -88,13 +88,25 @@ def garch_fit(economy: str, series_col: str, order: tuple, mtime: float):
     return econometrics.fit_garch(change, p=order[0], q=order[1])
 
 
-def build_task_data(monthly: pd.DataFrame, economy: str, task: str, spec: dict | None, horizon: int) -> dict | None:
-    """Assemble the leakage-guarded feature matrix and target for one run, or None."""
+def build_task_data(
+    monthly: pd.DataFrame,
+    economy: str,
+    task: str,
+    spec: dict | None,
+    horizon: int,
+    *,
+    observed_through: pd.Timestamp,
+) -> dict | None:
+    """Build labelled data from complete outcomes, retaining the live feature row."""
+    outcome_monthly = monthly.copy()
+    last = pd.Timestamp(observed_through)
+    if last != last + pd.offsets.BMonthEnd(0):
+        outcome_monthly.loc[outcome_monthly.index.to_period("M") == last.to_period("M")] = np.nan
     if task == "classification":
         spec = targets.CURATED_TARGETS.get(economy, {}).get("Policy rate")
-        y = targets.direction_target(monthly, economy, horizon)
+        y = targets.direction_target(outcome_monthly, economy, horizon)
     else:
-        y = targets.value_target(monthly, spec["column"], horizon) if spec else None
+        y = targets.value_target(outcome_monthly, spec["column"], horizon) if spec else None
     if y is None or spec is None:
         return None
     data = features.build_matrix(
@@ -120,7 +132,7 @@ def group_of(feature: str, target_column: str) -> str:
         return "Target lags"
     if feature.startswith(MACRO_RATE_COLUMNS):
         return "Macro"
-    if feature.startswith(("rate_", "yld_", "sprd_")):
+    if feature.startswith(("rate_", "yld_", "sprd_", "psprd_")):
         return "Rates"
     if feature.startswith(("eq_", "fx_", "cmd_", "idx_")):
         return "Market"
@@ -253,6 +265,7 @@ def save_bundle_artifacts(bundle: dict) -> None:
         leaderboard=bundle["board"],
         signature=signature,
         extra={
+            "training_options": bundle["training_options"],
             "classes": bundle["classes"],
             "ensemble_info": bundle.get("ensemble_info"),
             "neural_names": sorted(bundle["neural_names"]),
@@ -350,7 +363,7 @@ with tab_setup:
         st.markdown(interpret.MONTHLY_RATIONALE)
         st.markdown(interpret.CV_HELP)
 
-    data = build_task_data(monthly, economy, task, spec, horizon)
+    data = build_task_data(monthly, economy, task, spec, horizon, observed_through=get_master(economy, mtime).index[-1])
     if data is None:
         st.warning(
             "Could not build a modelling matrix for this configuration (missing target column "
@@ -362,26 +375,39 @@ with tab_setup:
         st.markdown("**The modelling data**")
         span = f"{X.index.min():%Y-%m} to {X.index.max():%Y-%m}"
         st.caption(f"{X.shape[0]} monthly rows, {X.shape[1]} features, {span}.")
-        n_months, lag_cost = len(monthly), max(TARGET_LAGS)
-        row_gap = n_months - lag_cost - horizon - X.shape[0]
-        st.caption(
-            f"The row count and date range move with the horizon: the last {horizon} month(s) have "
-            "no observed outcome yet, so they cannot be training rows (they are what the fitted "
-            f"model predicts from), and the first {lag_cost} months are consumed by the target's "
-            f"lagged values used as features. A total of {lag_cost + horizon} months are thus removed from {n_months} "
-            f"months in the data resulting in {n_months - lag_cost - horizon} usable rows."
-            + (f" A further {row_gap} month(s) drop out for missing feature values." if row_gap > 0 else "")
-        )
 
-        n_train = int(X.shape[0] * pipeline.SPLIT_PRESETS[split_preset][0]) - horizon
-        k_auto = pipeline.auto_k_features(n_train, X.shape[1])
-        st.caption(
-            f"Each row's outcome is only known {horizon} month(s) later, so the last {horizon} training "
-            "row(s) before the dev split and the last dev row(s) before the test split are dropped: their "
-            "labels would otherwise already contain the next split's outcomes. The same gap separates the "
-            "training and validation blocks inside cross-validation."
+        n_months = len(monthly)
+        lag_cost = max(TARGET_LAGS)
+        labelled_ceiling = max(n_months - lag_cost - horizon, 0)
+        additional_drops = max(labelled_ceiling - X.shape[0], 0)
+
+        row_note = (
+            f"The row count and date range move with the horizon. The source contains {n_months} monthly "
+            f"snapshots: the first {lag_cost} month(s) cannot be used until all target lags are available, "
+            f"and the last {horizon} month(s) normally have no fully observed {horizon}-month-ahead outcome "
+            f"yet, so they cannot be labelled for supervised training. This leaves up to "
+            f"{labelled_ceiling} labelled rows before feature completeness is considered."
         )
-        
+        if additional_drops > 0:
+            row_note += (
+                f" A further {additional_drops} row(s) are unavailable because required feature values "
+                "are missing or, when applicable, the final source month is still incomplete."
+            )
+        row_note += (
+            " The most recent feature-complete row is retained separately for Scenario, where an observed "
+            "future outcome is not required."
+        )
+        st.caption(row_note)
+
+        preview_splits = pipeline.chronological_split(
+            X,
+            y,
+            preset=split_preset,
+            gap=horizon,
+        )
+        n_train = len(preview_splits["Train"][0])
+        k_auto = pipeline.auto_k_features(n_train, X.shape[1], gap=horizon)
+
         if task == "classification":
             st.caption(interpret.class_balance_note(y))
             st.caption(
@@ -391,6 +417,7 @@ with tab_setup:
             )
         else:
             st.caption(interpret.target_change_note(econometrics.stationarity(y), target_name))
+
         st.caption(
             "Excluded from the inputs: the target's own column, every feature engineered from it "
             "(moving averages, returns, vols, changes) and any spread it is a component of. Its past "
@@ -399,16 +426,21 @@ with tab_setup:
             "autoregressive features, not leakage.",
             help=interpret.LEAKAGE_HELP,
         )
+
         st.caption(
             f"Not all {X.shape[1]} features reach a model. A one-feature-at-a-time F-test ranks them "
             f"by their association with the target, and only the top {k_auto} are kept. During "
             "cross-validation, selection is re-fit on each fold's training months only to avoid "
             "leakage. The final pipeline re-fits it on the full training split; those selected "
             "features are used on dev and test and listed in Diagnostics. k is limited by the "
-            "smallest expanding CV fold, at about 4 training rows per feature."
+            "smallest expanding CV training fold after its horizon gap, keeping about 4 training "
+            "rows per selected feature."
         )
 
+training_options = {"metric": metric, "budget": budget, "neural": include_neural}
 current_sig = (
+    registry.MODEL_SCHEMA_VERSION,
+    budget,
     economy,
     task,
     target_name,
@@ -422,10 +454,13 @@ current_sig = (
 bundle = st.session_state.get("mdl_bundle")
 if (bundle is None or bundle["sig"] != current_sig) and X is not None and y is not None:
     key = registry.cache_key(economy, task, target_name, horizon, split_preset)
-    loaded = registry.load_artifacts(key)
-    if loaded is not None and not registry.is_stale(loaded["metadata"], registry.data_signature(X, y)):
+    loaded = registry.load_artifacts(key, signature=registry.data_signature(X, y), training_options=training_options)
+    if loaded is not None:
         meta = loaded["metadata"]
         models_loaded = dict(loaded["models"])
+        for model in models_loaded.values():
+            if hasattr(model, "history_"):
+                model.history_ = data["X_all"]
         wanted_neural = {"MLP", "LSTM"} if include_neural else set()
         neural_loaded = set(meta.get("neural_names") or []) & set(models_loaded)
         for name in neural_loaded - wanted_neural:
@@ -438,6 +473,7 @@ if (bundle is None or bundle["sig"] != current_sig) and X is not None and y is n
             "horizon": horizon,
             "split_preset": split_preset,
             "metric": metric,
+            "training_options": training_options,
             "trained_at": meta.get("trained_at"),
         }
         st.session_state["mdl_bundle"] = assemble_bundle(
@@ -471,11 +507,22 @@ with tab_train:
             if task == "classification":
                 train_classes = set(pd.Series(splits["Train"][1]).dropna().unique())
                 if train_classes != set(pd.Series(y).dropna().unique()):
-                    st.warning(
-                        "The training split does not contain every class present later in the "
-                        "sample, so that class will be unreliable on this small window."
+                    st.error(
+                        "The training split lacks a class that appears later. This configuration "
+                        "cannot be evaluated with the current closed-class roster. Choose another "
+                        "split or horizon; unseen labels are not silently recoded."
                     )
+                    st.stop()
 
+            try:
+                folds, skipped = pipeline.usable_time_folds(*splits["Train"], task, metric, gap=horizon)
+            except ValueError as exc:
+                st.error(str(exc))
+                st.stop()
+            st.caption(
+                f"Using {len(folds)} of 5 expanding CV folds; {skipped} omitted because the "
+                "training classes or validation metric are not available in that period."
+            )
             sklearn_names = list(pipeline.model_roster(task))
             n_sklearn = len(sklearn_names)
             queue = sklearn_names + (["MLP", "LSTM"] if include_neural else [])
@@ -546,7 +593,12 @@ with tab_train:
 
                 try:
                     fitted_neural = neural_mod.fit_neural_models(
-                        splits["Train"][0], y_train_enc, task, history=data["X_all"], progress=neural_progress
+                        splits["Train"][0],
+                        y_train_enc,
+                        task,
+                        history=data["X_all"],
+                        gap=horizon,
+                        progress=neural_progress,
                     )
                     models.update(fitted_neural)
                     neural_names = set(fitted_neural)
@@ -558,10 +610,16 @@ with tab_train:
                 try:
                     ens = ensemble.build_ensembles(roster["models"], split_eval, task, labels=labels)
                     models.update(ens["ensembles"])
+                    if ens["skip_reason"]:
+                        st.info(ens["skip_reason"])
                     ensemble_info = {
                         "members": ens["members"],
                         "weights": ens["weights"],
-                        "meta_model": type(ens["ensembles"]["Stack"].meta_model).__name__,
+                        "meta_model": (
+                            type(ens["ensembles"]["Stack"].meta_model).__name__
+                            if "Stack" in ens["ensembles"]
+                            else "not fitted"
+                        ),
                     }
                 except Exception as exc:
                     st.warning(f"Ensembles were skipped: {exc}")
@@ -574,6 +632,7 @@ with tab_train:
                 "horizon": horizon,
                 "split_preset": split_preset,
                 "metric": metric,
+                "training_options": training_options,
             }
             bundle = assemble_bundle(
                 models,
@@ -1117,6 +1176,11 @@ with tab_scenario:
 
         # Driver options and the anchor move with economy/task/target/horizon/data, not with
         # scoring or split choices; reset the controlled scenario widgets only when those change.
+        st.caption(
+            f"This evaluation model was fitted through {bundle['splits']['Train'][0].index[-1]:%Y-%m}. "
+            f"The current data snapshot ends on {get_master(economy, mtime).index[-1]:%Y-%m-%d}. "
+            "Scenario does not refit the model on Dev or Test, and a month-end label may denote a partial month."
+        )
         scn_sig = (economy, task, target_name, horizon, mtime)
         if st.session_state.get("mdl_scn_sig") != scn_sig or "mdl_scn_drivers" not in st.session_state:
             st.session_state["mdl_scn_sig"] = scn_sig
@@ -1164,7 +1228,7 @@ with tab_scenario:
                 st.caption(
                     f"Read this as the net direction of the policy rate between {anchor_month:%Y-%m} "
                     f"and {target_month:%Y-%m}, not a specific meeting's decision - no Fed/ECB meeting "
-                    "calendar is modelled. Hike/Cut means the rate ends at least 12.5 bp (half a "
+                    "calendar is modelled. Hike/Cut means the rate ends more than 12.5 bp (half a "
                     "25 bp step) higher/lower over the window, whatever the number of meetings in "
                     "between; Hold means it stays inside that band."
                 )
@@ -1291,7 +1355,10 @@ with tab_forecast:
 
         res = arima_fit(economy, series_col, chosen_order, seasonal_order, mtime)
         if res is None:
-            st.info("The ARIMA fit needs at least 20 observations and a valid order.")
+            st.info(
+                "The ARIMA model could not be fitted reliably for this specification "
+                "(insufficient data, an invalid order or optimizer non-convergence)."
+            )
         else:
             diag = econometrics.arima_diagnostics(res)
             acc = arima_accuracy(economy, series_col, chosen_order, seasonal_order, mtime)
@@ -1309,6 +1376,11 @@ with tab_forecast:
                     f"above (series' own units), versus in-sample one-step errors of {acc['train_rmse']:,.3f} / "
                     f"{acc['train_mae']:,.3f}. The forecast below then refits the same specification on the "
                     "full history - there is no held-out data behind that fit."
+                )
+            if acc is not None:
+                st.caption(
+                    f"No-change holdout baseline: RMSE {acc['naive_rmse']:.3f}, MAE {acc['naive_mae']:.3f}. "
+                    + interpret.skill_verdict(acc["skill"])
                 )
             fc_index = pd.date_range(series.index[-1] + pd.offsets.MonthEnd(1), periods=steps, freq="ME")
             fc = {

@@ -81,8 +81,9 @@ def build_matrix(
         for lag in target_lags:
             features[f"{target_column}_lag{lag}"] = base.shift(lag)
 
-    complete = features.dropna()
-    combined = complete.join(y.rename("__target__"), how="inner").dropna()
+    complete = features.replace([np.inf, -np.inf], np.nan).dropna()
+    target = y.replace([np.inf, -np.inf], np.nan)
+    combined = complete.join(target.rename("__target__"), how="inner").dropna()
     if combined.shape[0] < min_rows:
         return None
     target = combined.pop("__target__")

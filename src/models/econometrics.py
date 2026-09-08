@@ -5,6 +5,7 @@ import pandas as pd
 import statsmodels.api as sm
 from arch import arch_model
 from scipy.stats import norm
+from sklearn.feature_selection import f_classif
 from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.stats.stattools import durbin_watson, jarque_bera
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
@@ -26,10 +27,13 @@ def stationarity(series: pd.Series, regression: str = "c") -> dict | None:
         dict | None: 'adf', 'p_value', 'stationary' (p < 0.05) and 'n', or None if
         fewer than 12 observations remain.
     """
-    values = pd.Series(series).dropna()
-    if len(values) < 12:
+    values = pd.Series(series).replace([np.inf, -np.inf], np.nan).dropna()
+    if len(values) < 12 or values.nunique() < 2:
         return None
-    result = adfuller(values, regression=regression)
+    try:
+        result = adfuller(values, regression=regression)
+    except (ValueError, np.linalg.LinAlgError):
+        return None
     return {
         "adf": float(result[0]),
         "p_value": float(result[1]),
@@ -56,7 +60,7 @@ def acf_pacf(series: pd.Series, nlags: int = 24, alpha: float = 0.05) -> dict | 
     """
     values = pd.Series(series).dropna()
     nlags = min(nlags, len(values) // 2 - 1)
-    if nlags < 1:
+    if nlags < 1 or values.nunique() < 2:
         return None
     acf_vals = acf(values, nlags=nlags, fft=True)
     pacf_vals = pacf(values, nlags=nlags)
@@ -71,49 +75,77 @@ def fit_arima(series: pd.Series, order=(1, 0, 0), seasonal_order=(0, 0, 0, 0)):
     A non-zero seasonal_order turns this into SARIMA; the same entry point serves
     both so the page exposes one order picker plus an optional seasonal block.
 
+    Non-converged maximum-likelihood fits are retried with a larger iteration
+    budget before being rejected.
+
     Args:
         series (pd.Series): Series to model (month-end-indexed for the monthly view).
         order (tuple): (p, d, q) non-seasonal order.
         seasonal_order (tuple): (P, D, Q, s) seasonal order (s=0 disables it).
 
     Returns:
-        The fitted statsmodels result, or None if the fit fails or n < 20.
+        The fitted statsmodels result, or None if the fit fails, does not converge
+        after retrying, produces non-finite estimates, or n < 20.
     """
-    values = pd.Series(series).dropna()
-    if len(values) < 20:
+    values = pd.Series(series).replace([np.inf, -np.inf], np.nan).dropna()
+    if len(values) < 20 or values.nunique() < 2:
         return None
+
     try:
         with warnings.catch_warnings():
-            # The order search fits many deliberately bad candidates; their expected
-            # non-stationary/non-invertible start-parameter and MLE convergence
-            # warnings would flood the terminal without changing any result.
             warnings.simplefilter("ignore", ConvergenceWarning)
             warnings.filterwarnings("ignore", message="Non-stationary starting autoregressive")
             warnings.filterwarnings("ignore", message="Non-invertible starting MA")
-            return ARIMA(values, order=order, seasonal_order=seasonal_order).fit()
+
+            model = ARIMA(
+                values,
+                order=order,
+                seasonal_order=seasonal_order,
+            )
+
+            # Give the state-space optimiser more room than its default budget.
+            result = model.fit(method_kwargs={"maxiter": 500})
+
+            # A difficult specification may stop at the iteration limit despite
+            # being close to a solution. Continue from the parameters already found.
+            if not result.mle_retvals.get("converged", True):
+                result = model.fit(
+                    start_params=np.asarray(result.params),
+                    method_kwargs={"maxiter": 1000},
+                )
+
+        if (
+            not result.mle_retvals.get("converged", True)
+            or not np.isfinite(result.aic)
+            or not np.isfinite(np.asarray(result.params)).all()
+        ):
+            return None
+
+        return result
+
     except (ValueError, np.linalg.LinAlgError):
         return None
 
 
 def arima_diagnostics(result, lb_lags: int = 12) -> dict:
-    """
-    Extract information criteria and a Ljung-Box residual autocorrelation check.
-
-    Args:
-        result: Fitted ARIMA result from `fit_arima`.
-        lb_lags (int): Lag at which to report the Ljung-Box statistic.
-
-    Returns:
-        dict: 'aic', 'bic', 'ljung_box_stat', 'ljung_box_p' (high p = residuals look
-        like white noise) and the residual series.
-    """
-    resid = pd.Series(result.resid).dropna()
-    lb = acorr_ljungbox(resid, lags=[lb_lags], return_df=True)
+    """Residual diagnostics after state initialisation, with fitted-order degrees of freedom."""
+    burn = max(int(getattr(result, "loglikelihood_burn", 0)), int(getattr(result, "nobs_diffuse", 0)))
+    resid = pd.Series(result.resid).iloc[burn:].replace([np.inf, -np.inf], np.nan).dropna()
+    p, _, q = result.model.order
+    P, _, Q, _ = result.model.seasonal_order
+    model_df = p + q + P + Q
+    lag = min(max(lb_lags, model_df + 1), max(1, len(resid) // 5))
+    stat = p_value = float("nan")
+    if lag > model_df and len(resid) > lag:
+        lb = acorr_ljungbox(resid, lags=[lag], model_df=model_df, return_df=True)
+        stat, p_value = float(lb["lb_stat"].iloc[0]), float(lb["lb_pvalue"].iloc[0])
     return {
         "aic": float(result.aic),
         "bic": float(result.bic),
-        "ljung_box_stat": float(lb["lb_stat"].iloc[0]),
-        "ljung_box_p": float(lb["lb_pvalue"].iloc[0]),
+        "ljung_box_stat": stat,
+        "ljung_box_p": p_value,
+        "ljung_box_lag": lag,
+        "model_df": model_df,
         "resid": resid,
     }
 
@@ -160,7 +192,10 @@ def fit_garch(series: pd.Series, p: int = 1, q: int = 1, dist: str = "t"):
         return None
     try:
         model = arch_model(values, mean="Constant", vol="GARCH", p=p, q=q, dist=dist, rescale=True)
-        return model.fit(disp="off")
+        result = model.fit(disp="off")
+        if result.convergence_flag != 0 or not np.isfinite(result.aic):
+            return None
+        return result
     except (ValueError, np.linalg.LinAlgError):
         return None
 
@@ -206,11 +241,7 @@ def arima_candidate(values: pd.Series, order: tuple, seasonal_order: tuple) -> d
     res = fit_arima(values, order=order, seasonal_order=seasonal_order)
     if res is None:
         return None
-    resid = pd.Series(res.resid).dropna()
-    try:
-        lb_p = float(acorr_ljungbox(resid, lags=[12], return_df=True)["lb_pvalue"].iloc[0])
-    except (ValueError, IndexError):
-        lb_p = float("nan")
+    lb_p = arima_diagnostics(res)["ljung_box_p"]
     return {
         "Order": order,
         "Seasonal": seasonal_order,
@@ -232,11 +263,10 @@ def arima_order_search(
     """
     Small Box-Jenkins grid search over ARIMA orders, with SARIMA candidates.
 
-    Stage one fits every non-seasonal (p, d, q) on the grid; stage two adds a small
-    set of seasonal orders on top of the three best non-seasonal candidates, so
-    SARIMA competes in the same leaderboard without an exhaustive (and slow) joint
-    grid. Differencing is left to the grid rather than forced, so a stationary
-    series can still select d = 0.
+    ADF screening chooses d on the supplied pre-holdout history before AIC/BIC
+    compares p/q candidates with the same differencing order. This is a heuristic,
+    not proof of stationarity. The random-walk/constant-mean baseline is included.
+    Stage two adds seasonal AR/MA terms to the best three candidates, with D=0.
 
     Args:
         series (pd.Series): Series to model (month-end-indexed for the monthly view).
@@ -255,15 +285,18 @@ def arima_order_search(
     values = pd.Series(series).dropna()
     if len(values) < 20:
         return None
+    differenced, d = values, 0
+    while d < max_d:
+        check = stationarity(differenced)
+        if check is None or check["stationary"]:
+            break
+        differenced, d = differenced.diff().dropna(), d + 1
     rows = []
-    for d in range(max_d + 1):
-        for p in range(max_p + 1):
-            for q in range(max_q + 1):
-                if p == 0 and q == 0:
-                    continue
-                row = arima_candidate(values, (p, d, q), (0, 0, 0, 0))
-                if row is not None:
-                    rows.append(row)
+    for p in range(max_p + 1):
+        for q in range(max_q + 1):
+            row = arima_candidate(values, (p, d, q), (0, 0, 0, 0))
+            if row is not None:
+                rows.append(row)
     if not rows:
         return None
     plain = pd.DataFrame(rows).sort_values(ic.upper())
@@ -305,11 +338,8 @@ def garch_order_search(
     rows = []
     for p in range(1, max_p + 1):
         for q in range(1, max_q + 1):
-            try:
-                res = arch_model(values, mean="Constant", vol="GARCH", p=p, q=q, dist=dist, rescale=True).fit(
-                    disp="off"
-                )
-            except (ValueError, np.linalg.LinAlgError):
+            res = fit_garch(values, p=p, q=q, dist=dist)
+            if res is None:
                 continue
             rows.append({"Order": (p, q), "AIC": float(res.aic), "BIC": float(res.bic)})
     if not rows:
@@ -345,8 +375,13 @@ def arima_backtest(series: pd.Series, order=(1, 0, 0), seasonal_order=(0, 0, 0, 
     if res is None:
         return None
     errors = test.to_numpy() - np.asarray(res.get_forecast(steps=holdout).predicted_mean)
-    resid = np.asarray(res.resid)
+    resid = arima_diagnostics(res)["resid"].to_numpy()
+    naive_errors = test.to_numpy() - float(train.iloc[-1])
+    naive_rmse = float(np.sqrt(np.mean(naive_errors**2)))
     return {
+        "naive_rmse": naive_rmse,
+        "naive_mae": float(np.mean(np.abs(naive_errors))),
+        "skill": 1 - float(np.mean(errors**2)) / naive_rmse**2 if naive_rmse > 0 else None,
         "holdout": int(holdout),
         "rmse": float(np.sqrt(np.mean(errors**2))),
         "mae": float(np.mean(np.abs(errors))),
@@ -475,7 +510,7 @@ def logit_baseline(X: pd.DataFrame, y: pd.Series, max_features: int = 10) -> dic
     """
     Multinomial-logit baseline for the direction classifier.
 
-    Fits statsmodels MNLogit on the most target-correlated, standardised features as
+    Fits statsmodels MNLogit on features ranked by a class-order-invariant F statistic as
     an interpretable reference: pseudo-R², information criteria, the overall
     likelihood-ratio test and per-class coefficient significance.
 
@@ -496,7 +531,13 @@ def logit_baseline(X: pd.DataFrame, y: pd.Series, max_features: int = 10) -> dic
     order = list(pd.Series(raw).value_counts().index)
     labels = pd.Categorical(raw, categories=order)
     codes = pd.Series(labels.codes, index=data.index)
-    cols = top_correlated_features(data, codes.astype(float), max_features)
+    if len(order) < 2:
+        return None
+    usable = data.loc[:, data.nunique() > 1]
+    if usable.empty:
+        return None
+    scores, _ = f_classif(usable, codes)
+    cols = list(pd.Series(scores, index=usable.columns).dropna().nlargest(max_features).index)
     if not cols:
         return None
     standardised = (data[cols] - data[cols].mean()) / data[cols].std(ddof=0)
@@ -507,6 +548,8 @@ def logit_baseline(X: pd.DataFrame, y: pd.Series, max_features: int = 10) -> dic
     try:
         res = sm.MNLogit(codes.loc[design.index], design).fit(disp=0, maxiter=200)
     except Exception:
+        return None
+    if not res.mle_retvals.get("converged", True) or not np.isfinite(np.asarray(res.params)).all():
         return None
     categories = list(labels.categories)
     coefficients = pd.DataFrame(np.asarray(res.pvalues), index=design.columns, columns=categories[1:])

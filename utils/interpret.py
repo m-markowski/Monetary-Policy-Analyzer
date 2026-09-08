@@ -200,8 +200,10 @@ SPLIT_HELP = (
 )
 
 CV_HELP = (
-    "Cross-validation uses `TimeSeriesSplit` with the same `horizon`-long gap: each fold trains on the "
-    "past, skips the months whose labels are not yet realised and validates on the next block."
+    "Five expanding TimeSeriesSplit folds are proposed with a horizon-sized gap. A shared subset is used "
+    "by every model: classifier training folds need all outer-training classes, and ROC-AUC validation "
+    "needs at least two classes. The app reports omitted folds and refuses fewer than two usable folds. "
+    "Feature selection and scaling are fitted within each retained fold."
 )
 
 BUDGET_HELP = (
@@ -282,9 +284,9 @@ CV_BUDGET_HELP = (
 )
 
 CV_ROC_AUC_NOTE = (
-    "On the small monthly sample an early fold can hold a single class, where one-vs-rest ROC-AUC "
-    "is undefined and contributes the chance value 0.5 - so a flat-looking CV number reflects those "
-    "degenerate folds, not a bug."
+    "AUC is undefined on a single-class validation period. Such folds are omitted and counted, not "
+    "assigned 0.5. Macro OvR AUC averages scoreable classes, so compare scores together with their class "
+    "coverage and evaluation dates."
 )
 
 ENSEMBLE_HELP = (
@@ -424,12 +426,14 @@ FORECAST_HELP = (
 )
 
 ARIMA_HELP = (
-    "ARIMA/SARIMA models a series from its own past values (AR), past forecast errors (MA) and "
-    "differencing (I) that removes a trend; the seasonal part repeats that at an annual period. The app "
-    "chooses the order for you on the history before the 12-month holdout: it grid-searches candidate orders "
-    "(seasonal ones included), ranks them by information criteria (lower AIC/BIC is better) and checks the "
-    "residuals for leftover autocorrelation (Ljung-Box). The ACF/PACF charts and the candidate table are "
-    "informational - useful mainly if you override the order manually."
+    "ARIMA/SARIMA models a series using its own past values (AR), past forecast errors (MA) and "
+    "differencing (I) to remove non-stationary trends; the seasonal part applies the same idea at an annual "
+    "cycle. The app chooses the automatic order using only the history before the 12-month holdout: an "
+    "ADF-based heuristic first selects the differencing order d, then AIC/BIC compare candidate p/q and "
+    "seasonal specifications at that fixed d, including a simple random-walk/constant benchmark. The final "
+    "12 months are kept out of automatic order selection. ADF and Ljung-Box are diagnostic checks rather "
+    "than guarantees that the model is adequate, while the ACF/PACF charts and candidate table are mainly "
+    "informational and useful when exploring a manual order."
 )
 
 GARCH_HELP = (
@@ -475,26 +479,35 @@ def cointegration_verdict(res: dict, x_name: str, y_name: str, alpha: float) -> 
     """Plain-language reading of a `stats.stationarity_and_cointegration` result."""
 
     def word(flag: bool) -> str:
-        return "stationary" if flag else "non-stationary (trending)"
+        return "stationary" if flag else "not stationary in levels"
 
     head = (
-        f"ADF: {x_name} is {word(res['x_stationary'])} (p = {format_pvalue(res['adf_p_x'])}); "
-        f"{y_name} is {word(res['y_stationary'])} (p = {format_pvalue(res['adf_p_y'])})."
+        f"ADF: {x_name} is {word(res['x_stationary'])} "
+        f"(p = {format_pvalue(res['adf_p_x'])}); "
+        f"{y_name} is {word(res['y_stationary'])} "
+        f"(p = {format_pvalue(res['adf_p_y'])})."
     )
+
     if res["x_stationary"] and res["y_stationary"]:
-        tail = "Both are already stationary, so the level correlation is not a trend artefact."
+        tail = (
+            "Both are already stationary in levels, so an Engle-Granger cointegration "
+            "test is not needed; the usual shared-trend concern is reduced."
+        )
+    elif not res.get("coint_tested", False):
+        tail = "Engle-Granger was not run because the pair did not meet the conditions for an I(1) cointegration test."
     elif res["cointegrated"]:
         tail = (
-            f"Engle-Granger p = {format_pvalue(res['coint_p'])} < α = {alpha:g}: the pair is "
-            "cointegrated - they share a stable long-run relationship, so the level "
-            "association is genuine, not spurious."
+            f"Engle-Granger p = {format_pvalue(res['coint_p'])} < α = {alpha:g}: "
+            "there is evidence of cointegration, suggesting a stable long-run "
+            "relationship between the series."
         )
     else:
         tail = (
-            f"Engle-Granger p = {format_pvalue(res['coint_p'])} (not below α = {alpha:g}): no "
-            "cointegration detected, so a strong level correlation here is likely spurious "
-            "(shared trends). Read it as co-movement only."
+            f"Engle-Granger p = {format_pvalue(res['coint_p'])} "
+            f"(not below α = {alpha:g}): no cointegration detected, so a strong "
+            "level correlation may reflect shared trends and should be interpreted cautiously."
         )
+
     return f"{head} {tail}"
 
 

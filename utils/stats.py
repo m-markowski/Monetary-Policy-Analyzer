@@ -51,7 +51,7 @@ def normality_battery(series: pd.Series, alpha: float = 0.05) -> pd.DataFrame | 
 
     Jarque-Bera, Lilliefors and Anderson-Darling always run; Shapiro-Wilk is skipped above 5000 points,
     where its p-value is unreliable. The Anderson-Darling p-value is interpolated from SciPy's critical-value
-    tables, so it is capped at 0.15."
+    tables, so it is capped at 0.15.
 
     Args:
         series (pd.Series): Numeric variable to test.
@@ -62,7 +62,7 @@ def normality_battery(series: pd.Series, alpha: float = 0.05) -> pd.DataFrame | 
         or None if fewer than eight non-missing observations exist.
     """
     values = series.dropna().to_numpy()
-    if values.size < 8:
+    if values.size < 8 or not np.isfinite(values).all() or np.ptp(values) == 0:
         return None
 
     jb = stats.jarque_bera(values)
@@ -113,7 +113,7 @@ def compare_groups(
     series: pd.Series,
     labels: pd.Series,
     alpha: float = 0.05,
-    min_count: int = 2,
+    min_count: int = 3,
 ) -> dict | None:
     """
     Compare a variable across groups, auto-selecting the appropriate test.
@@ -139,7 +139,7 @@ def compare_groups(
     frame = frame[frame["group"].isin(counts[counts >= min_count].index)]
     frame["group"] = frame["group"].astype(str)
     arrays = [g["value"].to_numpy() for _, g in frame.groupby("group", observed=True)]
-    if len(arrays) < 2:
+    if len(arrays) < 2 or any(a.size < 3 or not np.isfinite(a).all() or np.ptp(a) == 0 for a in arrays):
         return None
 
     normal = all((stats.shapiro(a).pvalue if a.size <= 5000 else stats.jarque_bera(a).pvalue) > alpha for a in arrays)
@@ -165,6 +165,8 @@ def compare_groups(
         statistic, p_value = stats.kruskal(*arrays)
         test = "Kruskal-Wallis"
     statistic, p_value = float(statistic), float(p_value)
+    if not np.isfinite(statistic) or not np.isfinite(p_value):
+        return None
 
     normality_note = "all groups ~normal" if normal else "non-normal group(s)"
     variance_note = "equal variances" if equal_var else "unequal variances"
@@ -209,44 +211,40 @@ def correlation_matrix(
 def stationarity_and_cointegration(
     x: pd.Series, y: pd.Series, alpha: float = 0.05, max_lag: int | None = None
 ) -> dict | None:
+    """Screen for I(1)-compatible series before an exploratory Engle-Granger test.
+
+    ADF rejection/non-rejection is evidence, not proof of an integration order.
+    The cointegration test is omitted for constant, level-stationary or unresolved
+    inputs. None indicates insufficient or numerically unusable data.
     """
-    ADF stationarity of each series plus an Engle-Granger cointegration test.
-
-    Two trending (non-stationary) series can show a strong level correlation even
-    when unrelated - the spurious-regression trap. ADF tests whether each series is
-    stationary in levels; the Engle-Granger test regresses one on the other and
-    checks whether the residual is stationary. A stationary residual means the pair
-    moves together around a stable long-run equilibrium (genuine cointegration),
-    otherwise a level correlation is likely spurious.
-
-    Args:
-        x (pd.Series): First variable (levels), index-aligned with y.
-        y (pd.Series): Second variable (levels).
-        alpha (float): Significance level for the stationary/cointegrated verdicts.
-        max_lag (int | None): Max augmentation lag; None lets statsmodels choose.
-
-    Returns:
-        dict | None: ADF p-values and stationary flags for x and y, the Engle-
-        Granger statistic/p-value and a cointegrated flag; None if fewer than 20
-        aligned observations remain.
-    """
-    pair = pd.concat([x, y], axis=1).dropna()
-    if pair.shape[0] < 20:
+    pair = pd.concat([x, y], axis=1).replace([np.inf, -np.inf], np.nan).dropna()
+    if len(pair) < 20 or (pair.nunique() < 2).any():
         return None
     xv, yv = pair.iloc[:, 0].to_numpy(), pair.iloc[:, 1].to_numpy()
-
-    adf_x = adfuller(xv, maxlag=max_lag, autolag="aic")
-    adf_y = adfuller(yv, maxlag=max_lag, autolag="aic")
-    coint_stat, coint_p, _ = coint(xv, yv, maxlag=max_lag, autolag="aic")
+    try:
+        px = float(adfuller(xv, maxlag=max_lag, autolag="aic")[1])
+        py = float(adfuller(yv, maxlag=max_lag, autolag="aic")[1])
+        dx, dy = np.diff(xv), np.diff(yv)
+        pdx = float(adfuller(dx, maxlag=max_lag, autolag="aic")[1]) if np.ptp(dx) else float("nan")
+        pdy = float(adfuller(dy, maxlag=max_lag, autolag="aic")[1]) if np.ptp(dy) else float("nan")
+        eligible = px >= alpha and py >= alpha and pdx < alpha and pdy < alpha
+        statistic = p_value = float("nan")
+        if eligible:
+            statistic, p_value, _ = coint(xv, yv, maxlag=max_lag, autolag="aic")
+    except (ValueError, np.linalg.LinAlgError):
+        return None
     return {
-        "n": int(pair.shape[0]),
-        "adf_p_x": float(adf_x[1]),
-        "adf_p_y": float(adf_y[1]),
-        "x_stationary": bool(adf_x[1] < alpha),
-        "y_stationary": bool(adf_y[1] < alpha),
-        "coint_stat": float(coint_stat),  # statistic from ADF test that is compared against the critical value
-        "coint_p": float(coint_p),  # respective p-value for the test
-        "cointegrated": bool(coint_p < alpha),
+        "n": len(pair),
+        "adf_p_x": px,
+        "adf_p_y": py,
+        "x_stationary": px < alpha,
+        "y_stationary": py < alpha,
+        "adf_diff_p_x": pdx,
+        "adf_diff_p_y": pdy,
+        "coint_tested": eligible,
+        "coint_stat": float(statistic),
+        "coint_p": float(p_value),
+        "cointegrated": bool(p_value < alpha) if eligible else None,
     }
 
 
@@ -314,9 +312,16 @@ def partial_correlation(
         data = data.rank()
 
     controls = np.column_stack([np.ones(len(data)), data[covars].to_numpy()])
+    dof = len(data) - np.linalg.matrix_rank(controls) - 1
+    if dof < 1:
+        return None
     res_x = data[x].to_numpy() - controls @ np.linalg.lstsq(controls, data[x], rcond=None)[0]
     res_y = data[y].to_numpy() - controls @ np.linalg.lstsq(controls, data[y], rcond=None)[0]
+    if np.allclose(res_x, 0) or np.allclose(res_y, 0):
+        return None
     r = float(np.corrcoef(res_x, res_y)[0, 1])
+    if not np.isfinite(r):
+        return None
 
     if abs(r) >= 1.0:
         p_value = 0.0
@@ -349,7 +354,7 @@ def categorical_association(a: pd.Series, b: pd.Series, alpha: float = 0.05) -> 
     if min(table.shape) < 2:
         return None
 
-    chi2, p_value, dof, _ = stats.chi2_contingency(table)
+    chi2, p_value, dof, _ = stats.chi2_contingency(table, correction=False)
     n = int(table.to_numpy().sum())
     cramers_v = np.sqrt(chi2 / (n * (min(table.shape) - 1)))
     return {

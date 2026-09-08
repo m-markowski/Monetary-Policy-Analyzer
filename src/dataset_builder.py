@@ -1,4 +1,5 @@
 import json
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -56,11 +57,16 @@ def build_and_save(economy: str, full_refresh: bool = False) -> dict:
         loader = EconomyDataLoader(economy=economy)
         raw = loader.build_raw_dataset()
 
+    master = loader.engineer_all_features(raw.copy())
+    if master.empty:
+        raise ValueError("Feature engineering produced no complete observations; existing cache retained.")
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    raw.to_parquet(rp, index=False)
-
-    master = loader.engineer_all_features(raw)
-    master.to_csv(master_path(economy), index=False)
+    with tempfile.TemporaryDirectory(dir=CACHE_DIR) as temporary:
+        staged_raw, staged_master = Path(temporary) / rp.name, Path(temporary) / master_path(economy).name
+        raw.to_parquet(staged_raw, index=False)
+        master.to_csv(staged_master, index=False)
+        staged_raw.replace(rp)
+        staged_master.replace(master_path(economy))
 
     return {
         "economy": economy,
@@ -115,18 +121,27 @@ def save_metadata(metas: dict) -> dict:
     metas = dict(metas)
     metas["overlap"] = compute_overlap(metas)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    METADATA_PATH.write_text(json.dumps(metas, indent=2))
+    with tempfile.TemporaryDirectory(dir=CACHE_DIR) as temporary:
+        staged = Path(temporary) / METADATA_PATH.name
+        staged.write_text(json.dumps(metas, indent=2), encoding="utf-8")
+        staged.replace(METADATA_PATH)
     return metas
 
 
 def cache_exists() -> bool:
     """True when the metadata sidecar and both master datasets exist."""
-    return METADATA_PATH.exists() and all(master_path(e).exists() for e in ECONOMIES)
+    return load_metadata() is not None and all(master_path(e).is_file() for e in ECONOMIES)
 
 
 def load_metadata() -> dict | None:
-    """Load the metadata sidecar, or None if it does not exist."""
-    return json.loads(METADATA_PATH.read_text()) if METADATA_PATH.exists() else None
+    """Read complete metadata, or return None for an absent or corrupt cache."""
+    try:
+        metadata = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+        if not isinstance(metadata, dict) or not all(economy in metadata for economy in ECONOMIES):
+            return None
+        return metadata
+    except (OSError, ValueError):
+        return None
 
 
 def load_master(economy: str) -> pd.DataFrame:

@@ -17,36 +17,36 @@ from sklearn.metrics import (
 
 
 def roc_auc_ovr_scorer(estimator, X, y) -> float:
-    """
-    Fold-safe macro one-vs-rest ROC-AUC scorer for TimeSeriesSplit CV.
-
-    Early expanding folds can train on a subset of classes (so `predict_proba`
-    returns fewer columns than the full label set) and a validation fold can miss a
-    class entirely. Probabilities are aligned to the estimator's fitted classes and
-    the AUC is averaged only over classes present in `y`, so a degenerate fold no
-    longer collapses the whole CV score to nan. A single-class fold, where OvR AUC
-    is undefined, contributes the chance value 0.5; every model sees the same folds
-    so this constant does not bias selection.
-
-    Args:
-        estimator: Fitted classifier exposing `predict_proba` and `classes_`.
-        X: Validation-fold features.
-        y: Validation-fold labels (encoded integers, matching training).
-
-    Returns:
-        float: Macro OvR ROC-AUC over the present classes, or 0.5 if undefined.
-    """
+    """Macro OvR AUC over scoreable classes; undefined AUC is not a chance score."""
     y = np.asarray(y)
     proba = np.asarray(estimator.predict_proba(X), dtype=float)
-    # Blend/Stack expose no classes_; their probability columns are the full encoded class set.
     classes = getattr(estimator, "classes_", np.arange(proba.shape[1]))
     aucs = []
     for col, cls in enumerate(classes):
-        binary = (y == cls).astype(int)
-        if binary.sum() in (0, len(binary)):
-            continue
-        aucs.append(roc_auc_score(binary, proba[:, col]))
-    return float(np.mean(aucs)) if aucs else 0.5
+        binary = y == cls
+        if binary.any() and not binary.all():
+            aucs.append(roc_auc_score(binary, proba[:, col]))
+    if not aucs:
+        raise ValueError("ROC-AUC is undefined for a single-class validation set.")
+    return float(np.mean(aucs))
+
+
+def argmax_f1_scorer(estimator, X, y) -> float:
+    """Score the same probability-argmax rule used in diagnostics and the board."""
+    proba = np.asarray(estimator.predict_proba(X))
+    classes = np.asarray(getattr(estimator, "classes_", np.arange(proba.shape[1])))
+    predicted = classes[np.argmax(proba, axis=1)]
+    return float(f1_score(y, predicted, labels=classes, average="macro", zero_division=0))
+
+
+def argmax_balanced_scorer(estimator, X, y) -> float:
+    """Balanced accuracy of the shared probability-argmax operating point."""
+    proba = np.asarray(estimator.predict_proba(X))
+    classes = np.asarray(getattr(estimator, "classes_", np.arange(proba.shape[1])))
+    predicted = classes[np.argmax(proba, axis=1)]
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="y_pred contains classes not in y_true")
+        return float(balanced_accuracy_score(y, predicted))
 
 
 REGRESSION_METRICS = ("RMSE", "MAE")
@@ -58,8 +58,8 @@ CV_SCORING = {
     "RMSE": "neg_root_mean_squared_error",
     "MAE": "neg_mean_absolute_error",
     "ROC-AUC (macro/OvR)": roc_auc_ovr_scorer,
-    "F1-macro": "f1_macro",
-    "Balanced accuracy": "balanced_accuracy",
+    "F1-macro": argmax_f1_scorer,
+    "Balanced accuracy": argmax_balanced_scorer,
 }
 
 
@@ -269,7 +269,7 @@ def build_leaderboard(models, splits, task, labels=None) -> pd.DataFrame:
                     row[f"{split_name} {metric}"] = value
             else:
                 proba = model.predict_proba(X)
-                pred = model.predict(X)
+                pred = np.asarray(labels)[np.argmax(proba, axis=1)]
                 metrics = classification_metrics(y, pred, labels)
                 row[f"{split_name} ROC-AUC (macro/OvR)"] = roc_auc_macro_ovr(y, proba, labels)
                 row[f"{split_name} F1-macro"] = metrics["F1-macro"]
@@ -346,5 +346,8 @@ def skill_vs_naive(board: pd.DataFrame, baseline: str = "Baseline: no change") -
     for col in board.columns:
         if col.endswith(" RMSE"):
             split = col[: -len(" RMSE")]
-            out[f"{split} Skill vs naive"] = 1.0 - board[col] ** 2 / board.loc[baseline, col] ** 2
-    return pd.DataFrame(out)
+            reference = float(board.loc[baseline, col])
+            out[f"{split} Skill vs naive"] = (
+                1.0 - board[col] ** 2 / reference**2 if np.isfinite(reference) and reference > 0 else np.nan
+            )
+    return pd.DataFrame(out, index=board.index)

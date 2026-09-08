@@ -423,7 +423,7 @@ def scatter_ols(
     else:
         fig = px.scatter(data, x=x, y=y, opacity=0.6)
 
-    if add_ols:
+    if add_ols and data[x].nunique() > 1:
         slope, intercept, r, _, _ = stats.linregress(data[x], data[y])
         line_x = np.array([data[x].min(), data[x].max()])
         fig.add_scattergl(
@@ -803,7 +803,7 @@ def cluster_selection_plot(
         for r in (1, 2):
             fig.add_vline(x=best_k, line_dash="dot", line_color="rgba(0,0,0,0.35)", row=r, col=1)
     fig.update_xaxes(title_text="Number of clusters (k)", dtick=1, row=2, col=1)
-    fig.update_layout(template=TEMPLATE, height=460)
+    fig.update_layout(template=TEMPLATE, height=460, title=title or "")
     return fig
 
 
@@ -1206,8 +1206,8 @@ def forecast_fan(
     idx = list(mean.index)
     mean_x, mean_y = idx, list(np.asarray(mean))
     fig = go.Figure()
-    if history is not None and len(history) > 0:
-        h = pd.Series(history).dropna()
+    h = pd.Series(dtype=float) if history is None else pd.Series(history).dropna()
+    if not h.empty:
         fig.add_scatter(x=h.index, y=h.to_numpy(), mode="lines", name="History", line={"color": "#1f77b4"})
         mean_x = [h.index[-1], *idx]
         mean_y = [float(h.iloc[-1]), *mean_y]
@@ -1217,7 +1217,7 @@ def forecast_fan(
         fill="toself",
         fillcolor="rgba(214,39,40,0.15)",
         line={"color": "rgba(255,255,255,0)"},
-        name="Confidence interval",
+        name="Prediction interval",
         hoverinfo="skip",
     )
     fig.add_scatter(x=mean_x, y=mean_y, mode="lines", name="Forecast", line={"color": "#d62728", "dash": "dash"})

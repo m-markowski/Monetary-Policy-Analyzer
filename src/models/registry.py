@@ -1,4 +1,5 @@
 import json
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pandas as pd
 from config.settings import PROJECT_ROOT
 
 MODELS_DIR = PROJECT_ROOT / "data" / "models"
+MODEL_SCHEMA_VERSION = 2
 
 
 def slugify(text: str) -> str:
@@ -98,6 +100,7 @@ def build_metadata(
         dict: Metadata including a 'trained_at' timestamp.
     """
     metadata = {
+        "schema_version": MODEL_SCHEMA_VERSION,
         "economy": economy,
         "task": task,
         "target": target,
@@ -135,50 +138,51 @@ def save_artifacts(models: dict, metadata: dict, key: str, directory: Path = MOD
     directory.mkdir(parents=True, exist_ok=True)
     model_path = directory / f"{key}.pkl"
     meta_path = directory / f"{key}.json"
-    joblib.dump(models, model_path)
-    meta_path.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
+    with tempfile.TemporaryDirectory(dir=directory) as temporary:
+        staged_model = Path(temporary) / model_path.name
+        staged_meta = Path(temporary) / meta_path.name
+        joblib.dump(models, staged_model)
+        staged_meta.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
+        # No stale sidecar may describe a newly written model if the second move fails.
+        meta_path.unlink(missing_ok=True)
+        staged_model.replace(model_path)
+        staged_meta.replace(meta_path)
     return {"model_path": model_path, "meta_path": meta_path}
 
 
-def load_artifacts(key: str, directory: Path = MODELS_DIR) -> dict | None:
-    """
-    Load a previously saved model set and its metadata.
+def load_artifacts(
+    key: str,
+    directory: Path = MODELS_DIR,
+    *,
+    signature: dict | None = None,
+    training_options: dict | None = None,
+) -> dict | None:
+    """Load trusted local artifacts only after checking metadata and compatibility.
 
-    Args:
-        key (str): Artifact key from `cache_key`.
-        directory (Path): Directory to read from.
-
-    Returns:
-        dict | None: 'models' and 'metadata', or None if either file is missing.
+    Pickle is executable input, not an interchange format for untrusted models.
+    Corrupt or incompatible local cache files are ignored and must be retrained.
     """
     directory = Path(directory)
-    model_path = directory / f"{key}.pkl"
-    meta_path = directory / f"{key}.json"
-    if not model_path.exists() or not meta_path.exists():
+    model_path, meta_path = directory / f"{key}.pkl", directory / f"{key}.json"
+    if not model_path.is_file() or not meta_path.is_file():
         return None
-    return {
-        "models": joblib.load(model_path),
-        "metadata": json.loads(meta_path.read_text(encoding="utf-8")),
-    }
+    try:
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        if metadata.get("schema_version") != MODEL_SCHEMA_VERSION:
+            return None
+        if signature is not None and is_stale(metadata, signature):
+            return None
+        if training_options is not None and metadata.get("training_options") != training_options:
+            return None
+        models = joblib.load(model_path)
+    except Exception:
+        # Cache incompatibilities must not prevent training a replacement.
+        return None
+    return {"models": models, "metadata": metadata}
 
 
 def is_stale(metadata: dict, signature: dict) -> bool:
-    """
-    Whether a saved artifact no longer matches the current data.
-
-    Compares content hashes and row count; a mismatch means the dataset grew or
-    changed since training, so a live refit is warranted.
-
-    Args:
-        metadata (dict): Loaded artifact metadata.
-        signature (dict): Current `data_signature`.
-
-    Returns:
-        bool: True if the artifact is stale.
-    """
+    """Reject changed values, row counts, feature names or feature ordering."""
     stored = metadata.get("signature", {})
-    return not (
-        stored.get("x_hash") == signature.get("x_hash")
-        and stored.get("y_hash") == signature.get("y_hash")
-        and stored.get("rows") == signature.get("rows")
-    )
+    fields = ("x_hash", "y_hash", "rows", "cols", "columns", "last_date")
+    return any(stored.get(field) != signature.get(field) for field in fields)

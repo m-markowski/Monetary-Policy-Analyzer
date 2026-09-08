@@ -13,6 +13,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -72,8 +73,17 @@ def read_json(path: Path) -> dict:
 
 
 def write_text(path: Path, text: str) -> None:
+    """Replace a local configuration file only after the complete write succeeds."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(text)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def read_env_text(path: Path) -> str:
@@ -244,7 +254,12 @@ def process_environment(key: str) -> dict[str, str]:
 
 def prepare_environment(env: dict[str, str], repair: bool = False) -> None:
     say("\n[4/5] Checking the application environment...")
-    first_install = not venv_python().is_file()
+    receipt = RUNTIME / "runtime-checked.txt"
+    lock_digest = hashlib.sha256((ROOT / "uv.lock").read_bytes()).hexdigest()
+    checked = receipt.read_text(encoding="utf-8").strip() if receipt.is_file() else ""
+    needs_check = repair or checked != lock_digest or not venv_python().is_file()
+    if needs_check:
+        receipt.unlink(missing_ok=True)
     command = [str(UV), "sync", "--locked", "--python", sys.executable]
     for name in BINARY_PACKAGES:
         command.extend(["--no-build-package", name])
@@ -252,12 +267,13 @@ def prepare_environment(env: dict[str, str], repair: bool = False) -> None:
         command.append("--reinstall")
     # uv compares .venv with uv.lock itself and does nothing when they already match.
     run_step(command, env, "Synchronising dependencies from uv.lock...")
-    if first_install or repair:
+    if needs_check:
         run_step(
             python_command(str(Path(__file__).resolve()), "--check-runtime"),
             env,
             "Checking imports, native libraries, the editable install and the neural networks...",
         )
+        write_text(receipt, lock_digest + "\n")
     say("Environment is ready.")
 
 

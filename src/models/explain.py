@@ -241,9 +241,13 @@ def partial_dependence_data(model, X, feature: str, grid_resolution: int = 40, t
         one row per class for classification, one row for regression.
     """
     try:
-        result = partial_dependence(model, X, [feature], grid_resolution=grid_resolution, kind="average")
+        kwargs = {"response_method": "predict_proba", "method": "brute"} if task == "classification" else {}
+        result = partial_dependence(model, X, [feature], grid_resolution=grid_resolution, kind="average", **kwargs)
         grid = result.get("grid_values", result.get("values"))[0]
-        return {"grid": np.asarray(grid), "average": np.asarray(result["average"])}
+        average = np.asarray(result["average"])
+        if task == "classification" and average.shape[0] == 1:
+            average = np.vstack([1 - average[0], average[0]])
+        return {"grid": np.asarray(grid), "average": average}
     except (TypeError, ValueError, AttributeError):
         lo, hi = np.nanpercentile(X[feature].to_numpy(dtype=float), [5.0, 95.0])
         grid = np.linspace(lo, hi, grid_resolution)
