@@ -79,14 +79,14 @@ VIF_HELP = (
 
 GROUP_TEST_GUIDE = (
     "This checks whether a feature has a different typical value from one regime to another.\n\n"
-    "- **Typical value** - the average; when the data is skewed or has outliers the "
-    "test switches to the median, a more robust middle value.\n"
+    "- **What is compared** - averages for t-tests/ANOVA; the distribution of values "
+    "for rank-based tests. A distribution can differ even when the medians are equal.\n"
     "- **Which test is used (picked automatically):**\n"
     "    - It first checks whether each regime's values are roughly normally distributed and whether "
     "the regimes have a similar spread (variance).\n"
     "    - If yes -> a **t-test** (two regimes) or **ANOVA** (three or more).\n"
     "    - If no -> a rank-based **Mann-Whitney** (two regimes) or **Kruskal-Wallis** (three "
-    "or more), which need no such assumptions.\n"
+    "or more), which do not require a normal distribution but still assume independent observations.\n"
     "- **p-value** - the chance of seeing a difference this big if the regimes were truly "
     "identical. **p-value** less than α means the difference is unlikely to be chance alone.\n"
     "- **Reality check:** these tests grow over-sensitive as the sample grows - on the full "
@@ -221,11 +221,10 @@ METRIC_HELP = (
 )
 
 LEAKAGE_HELP = (
-    "If the inputs contained the target's contemporaneous value - directly, through a feature "
-    "engineered from it, or through a spread it is a component of - the model would 'predict' the "
-    "future from a near-copy of the present and score unrealistically well, so those columns are "
-    "removed. The target's own lagged values are different: they were already observed when the "
-    "prediction is made, so including them is standard autoregression, not leakage."
+    "Leakage happens when a model uses information that would not yet be available at prediction time. "
+    "To stay conservative, the target's own column and features derived from it are excluded. "
+    "Past target values can still be used as lags because they were already known when the prediction "
+    "is made, so they are valid autoregressive features rather than leakage."
 )
 
 THRESHOLD_HELP = (
@@ -341,13 +340,10 @@ CONFUSION_HELP = (
 )
 
 IMPORTANCE_HELP = (
-    "Feature importance ranks the inputs by how much they drive the model, scaled to 0-100. Native "
-    "importance comes from the model itself (tree split gains, or the size of linear coefficients); "
-    "permutation importance shuffles one feature at a time and measures how much the score drops. "
-    "The permutation check runs on the dev months - data the model never saw while fitting - and "
-    "ignores the split selector at the top, so it measures what genuinely helps on unseen data "
-    "rather than what the model memorised. The two can disagree: native reflects how the model "
-    "was built, permutation what actually helps out of sample."
+    "Feature importance ranks the inputs, scaled to 0-100. Native importance comes from tree "
+    "splits or linear coefficients. Permutation importance shuffles one feature and measures "
+    "the score drop on Dev. Dev is held out for base models but is used to fit Blend and Stack, "
+    "so their permutation results are descriptive rather than an independent check."
 )
 
 GROUP_IMPORTANCE_HELP = (
@@ -385,14 +381,11 @@ PROB_HIST_HELP = (
 )
 
 RESIDUAL_HELP = (
-    "A well-specified regression leaves residuals (actual minus predicted) scattered randomly around "
-    "zero. A visible trend or a run of same-sign residuals means the model missed structure; a "
-    "consistent offset means it is biased high or low. The lag-1 number in the verdict is the "
-    "correlation between one month's error and the next month's: near 0 the errors are independent, "
-    "as they should be; near 1 the model makes almost the same miss month after month, so "
-    "there is predictable structure it failed to use. For the ML models this is a visual health "
-    "check, not a pass/fail test - the formal residual assumptions (Durbin-Watson, normality) belong "
-    "to the OLS baseline below, the only model actually built on them."
+    "Residuals are the difference between actual and predicted values. Ideally, they stay close to zero "
+    "without a clear pattern. A consistent positive or negative error suggests that the model tends to "
+    "under- or over-predict. Lag-1 correlation checks whether errors in neighbouring months tend to move "
+    "together. For forecasts longer than one month, some correlation is natural because the forecast "
+    "windows overlap, so this is a diagnostic clue rather than a pass/fail test."
 )
 
 ECON_BASELINE_HELP_REG = (
@@ -558,6 +551,8 @@ def skew_verdict(skew: float) -> str:
     Returns:
         str: One-sentence reading of direction and strength.
     """
+    if pd.isna(skew):
+        return "Skewness is unavailable for constant or insufficient data."
     magnitude = abs(skew)
     if magnitude < 0.5:
         shape = "approximately symmetric"
@@ -578,6 +573,8 @@ def kurtosis_verdict(excess_kurtosis: float) -> str:
     Returns:
         str: One-sentence reading of tail behaviour.
     """
+    if pd.isna(excess_kurtosis):
+        return "Kurtosis is unavailable for constant or insufficient data."
     if excess_kurtosis > 1.0:
         shape = "heavy-tailed (leptokurtic) - more outliers than a normal"
     elif excess_kurtosis < -1.0:
@@ -611,27 +608,19 @@ def normality_verdict(battery: pd.DataFrame, alpha: float) -> str:
 
 
 def compare_groups_sentence(result: dict, alpha: float, label: str) -> str:
-    """
-    Plain-language conclusion for a `stats.compare_groups` result.
-
-    Args:
-        result (dict): Output of `stats.compare_groups`.
-        alpha (float): Significance level used for the verdict.
-        label (str): Name of the variable being compared.
-
-    Returns:
-        str: Whether the variable's typical value differs across regimes.
-    """
-    centre = "average" if result["parametric"] else "median"
+    """Plain-language conclusion for a group comparison."""
+    comparison = "average" if result["parametric"] else "distribution"
     p = format_pvalue(result["p_value"])
     n_groups = len(result["group_sizes"])
     scope = "between the two regimes" if n_groups == 2 else f"across the {n_groups} regimes"
+
     if result["differs"]:
-        return (
-            f"Difference found: the {centre} of {label} is not the same {scope} "
-            f"(p = {p}, below α = {alpha:g}) - unlikely to be down to chance."
-        )
-    return f"No clear difference: the {centre} of {label} looks the same {scope} (p = {p}, not below α = {alpha:g})."
+        return f"Difference found: the {comparison} of {label} differs {scope} (p = {p}, below α = {alpha:g})."
+
+    return (
+        f"No clear difference detected: the {comparison} of {label} does not differ clearly {scope} "
+        f"(p = {p}, not below α = {alpha:g})."
+    )
 
 
 def spread_note(equal_var: bool) -> str:
@@ -952,29 +941,40 @@ def confusion_verdict(cm) -> str:
     return note
 
 
-def residual_verdict(y_true, y_pred) -> str:
-    """Plain reading of regression residuals: systematic bias and leftover autocorrelation."""
+def residual_verdict(y_true, y_pred, horizon: int = 1) -> str:
+    """Plain-language reading of regression residuals."""
     actual = pd.Series(y_true).to_numpy(dtype=float)
     predicted = pd.Series(y_pred).to_numpy(dtype=float)
     resid = pd.Series(actual - predicted).dropna()
+
     if len(resid) < 3:
         return ""
-    spread = resid.std(ddof=0) or 1.0
+
+    spread = resid.std(ddof=0)
     bias = resid.mean()
-    ac1 = resid.autocorr(lag=1)
+    ac1 = resid.autocorr(lag=1) if resid.nunique() > 1 else float("nan")
+
     parts = []
-    if abs(bias) > 0.1 * spread:
+
+    if spread > 0 and abs(bias) > 0.1 * spread:
         direction = "over-predicts" if bias < 0 else "under-predicts"
         parts.append(f"a systematic bias (it {direction} on average)")
-    if ac1 is not None and abs(ac1) > 0.3:
-        parts.append(
-            f"leftover autocorrelation (lag-1 = {ac1:.2f}: consecutive months' errors are "
-            "correlated, so the model keeps repeating similar misses instead of leaving "
-            "unpredictable noise)"
-        )
+
+    if pd.notna(ac1) and abs(ac1) > 0.3:
+        parts.append(f"a pattern in neighbouring months' errors (lag-1 correlation = {ac1:.2f})")
+
     if not parts:
-        return "Residuals scatter around zero with no strong pattern, which is what a well-specified model looks like."
-    return "The residuals show " + " and ".join(parts) + "."
+        text = "Residuals are centred around zero with no strong month-to-month pattern."
+    else:
+        text = "The residuals show " + " and ".join(parts) + "."
+
+    if horizon > 1 and pd.notna(ac1) and abs(ac1) > 0.3:
+        text += (
+            f" Because {horizon}-month forecasts overlap, some correlation between neighbouring "
+            "errors is expected and does not necessarily indicate a problem."
+        )
+
+    return text
 
 
 def class_balance_note(y) -> str:
@@ -1059,15 +1059,13 @@ def target_change_note(res: dict | None, name: str) -> str:
 
 
 def ljung_box_verdict(diag: dict, alpha: float = 0.05) -> str:
-    """Reading of the Ljung-Box residual white-noise check from `arima_diagnostics`."""
+    """Read the residual autocorrelation check, including an unavailable result."""
+    if pd.isna(diag["ljung_box_p"]):
+        return "Ljung-Box is unavailable: too few residuals for this model order."
     p = format_pvalue(diag["ljung_box_p"])
     if diag["ljung_box_p"] >= alpha:
-        return f"Ljung-Box p = {p}: the residuals look like white noise, so the model has captured the autocorrelation."
-    return (
-        f"Ljung-Box p = {p} (below α = {alpha:g}): some autocorrelation remains that this order does "
-        "not capture - even the best candidate can fail this check on a stubborn series, so treat the "
-        "forecast interval as approximate."
-    )
+        return f"Ljung-Box p = {p}: no clear residual autocorrelation was detected."
+    return f"Ljung-Box p = {p}: some autocorrelation remains. The model has not captured all of the time pattern."
 
 
 def garch_persistence_note(persistence: float) -> str:

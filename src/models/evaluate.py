@@ -140,6 +140,19 @@ def roc_auc_macro_ovr(y_true, y_proba, labels) -> float | None:
     return float(np.mean(aucs)) if aucs else None
 
 
+def normalize_probabilities(y_proba) -> np.ndarray:
+    """Correct floating-point round-off without accepting invalid probability scores."""
+    proba = np.asarray(y_proba, dtype=float)
+    if proba.ndim != 2 or proba.shape[0] == 0 or proba.shape[1] < 2:
+        raise ValueError("Expected a non-empty sample-by-class probability matrix.")
+    if not np.isfinite(proba).all() or np.any(proba < 0) or np.any(proba > 1):
+        raise ValueError("Class probabilities must be finite values between zero and one.")
+    totals = proba.sum(axis=1, keepdims=True)
+    if not np.allclose(totals, 1.0, rtol=0.0, atol=1e-6):
+        raise ValueError("Class probabilities must sum to one for each observation.")
+    return proba / totals
+
+
 def probability_metrics(y_true, y_proba, labels) -> dict:
     """
     Compute calibration-style scores (log loss and multiclass Brier).
@@ -156,7 +169,7 @@ def probability_metrics(y_true, y_proba, labels) -> dict:
         dict: 'Log loss' (None if undefined) and 'Brier'.
     """
     y_true = np.asarray(y_true)
-    y_proba = np.asarray(y_proba, dtype=float)
+    y_proba = normalize_probabilities(y_proba)
     try:
         ll = float(log_loss(y_true, y_proba, labels=labels))
     except ValueError:

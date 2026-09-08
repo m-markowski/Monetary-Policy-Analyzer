@@ -3,6 +3,7 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import log_loss, root_mean_squared_error
 
 from config.settings import SEED
+from src.models.evaluate import normalize_probabilities
 
 
 def stack_meta_features(models: dict, X, task: str) -> np.ndarray:
@@ -105,7 +106,7 @@ def blend_weights(models: dict, X_valid, y_valid, task: str, labels=None) -> dic
         if task == "regression":
             error = root_mean_squared_error(y_valid, model.predict(X_valid))
         else:
-            error = log_loss(y_valid, model.predict_proba(X_valid), labels=labels)
+            error = log_loss(y_valid, normalize_probabilities(model.predict_proba(X_valid)), labels=labels)
         inv[name] = 1.0 / max(error, 1e-9)
     total = sum(inv.values())
     return {name: weight / total for name, weight in inv.items()}

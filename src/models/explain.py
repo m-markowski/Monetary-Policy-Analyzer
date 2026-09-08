@@ -19,7 +19,8 @@ def final_estimator(model):
     Returns:
         The underlying fitted estimator (the Pipeline's 'model' step, or `model` itself).
     """
-    return model.named_steps["model"] if hasattr(model, "named_steps") else model
+    estimator = model.named_steps["model"] if hasattr(model, "named_steps") else model
+    return getattr(estimator, "regressor_", estimator)
 
 
 def selected_features(model, feature_names):

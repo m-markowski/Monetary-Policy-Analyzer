@@ -116,7 +116,20 @@ def variables_by_family(df: pd.DataFrame) -> dict[str, list[str]]:
 
 def allowed_transforms(family: str, column: str | None = None) -> list[str]:
     """Do not take log returns of percentage rates, spreads or signed indicators."""
-    no_log = {"cpi_sticky_core", "exp_infl_mich", "ind_fin_conditions", "gov_balance", "ind_sahm_realtime"}
+    no_log = {
+        "cpi_sticky_core",
+        "exp_infl_mich",
+        "ind_fin_conditions",
+        "gov_balance",
+        "ind_sahm_realtime",
+        "sent_cons_conf",
+        "sent_cpi_exp",
+        "sent_cons_econ_exp",
+        "sent_mfg_conf",
+        "sent_constr_orders",
+        "money_m3",
+        "wage_mfg_hr",
+    }
     if family in LEVELS_ONLY or column in no_log:
         return ["Level", "First difference"]
     return ["Level", "Log return (%)", "First difference"]
@@ -1067,12 +1080,16 @@ with tab_structure:
                     f"Silhouette is highest at k = {best_k}. Use the elbow in inertia as a "
                     "sanity check, then adjust k below if a different split is more interpretable."
                 )
-                k = st.slider(
-                    "Number of clusters (k)",
-                    int(sweep.index.min()),
-                    int(sweep.index.max()),
-                    best_k,
-                )
+                if len(sweep) == 1:
+                    k = best_k
+                    st.caption(f"Only k = {k} is available for these observations.")
+                else:
+                    k = st.slider(
+                        "Number of clusters (k)",
+                        int(sweep.index.min()),
+                        int(sweep.index.max()),
+                        best_k,
+                    )
 
                 km = kmeans_labels(scaled, k)
                 if km is None:

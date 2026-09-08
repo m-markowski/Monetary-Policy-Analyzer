@@ -5,6 +5,7 @@ from joblib import parallel_config
 from lightgbm import LGBMClassifier, LGBMRegressor
 from scipy.stats import loguniform, randint, uniform
 from sklearn.base import clone
+from sklearn.compose import TransformedTargetRegressor
 from sklearn.ensemble import (
     GradientBoostingClassifier,
     GradientBoostingRegressor,
@@ -127,11 +128,12 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
                 "needs_scaling": True,
             },
             "SVR": {
-                "estimator": SVR(),
+                "estimator": TransformedTargetRegressor(regressor=SVR(), transformer=StandardScaler()),
                 "space": {
-                    "model__C": ("float", 1e-1, 1e3, True),
-                    "model__gamma": ("cat", ["scale", "auto"]),
-                    "model__kernel": ("cat", ["rbf", "linear"]),
+                    "model__regressor__C": ("float", 1e-1, 1e3, True),
+                    "model__regressor__epsilon": ("float", 1e-2, 3e-1, True),
+                    "model__regressor__gamma": ("cat", ["scale", "auto"]),
+                    "model__regressor__kernel": ("cat", ["rbf", "linear"]),
                 },
                 "needs_scaling": True,
             },

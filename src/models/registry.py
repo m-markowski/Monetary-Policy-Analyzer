@@ -9,7 +9,7 @@ import pandas as pd
 from config.settings import PROJECT_ROOT
 
 MODELS_DIR = PROJECT_ROOT / "data" / "models"
-MODEL_SCHEMA_VERSION = 2
+MODEL_SCHEMA_VERSION = 3
 
 
 def slugify(text: str) -> str:

@@ -25,7 +25,8 @@ def describe_extended(series: pd.Series) -> pd.Series | None:
         return None
 
     mean = values.mean()
-    std = values.std(ddof=1)
+    std = values.std(ddof=1) if values.size > 1 else float("nan")
+    has_variation = np.ptp(values) > 0
     q1, q3 = np.percentile(values, [25, 75])
     return pd.Series(
         {
@@ -39,8 +40,8 @@ def describe_extended(series: pd.Series) -> pd.Series | None:
             "q1": q1,
             "q3": q3,
             "iqr": q3 - q1,
-            "skew": stats.skew(values),
-            "excess_kurtosis": stats.kurtosis(values),
+            "skew": stats.skew(values) if has_variation else float("nan"),
+            "excess_kurtosis": stats.kurtosis(values) if has_variation else float("nan"),
         }
     )
 

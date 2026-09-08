@@ -160,7 +160,9 @@ class KerasEstimator:
                 weights = dict(zip(present.tolist(), balanced.tolist(), strict=True))
         else:
             n_outputs = 1
-            target = np.asarray(y, dtype=float)
+            raw_target = np.asarray(y, dtype=float).reshape(-1, 1)
+            self.target_scaler_ = StandardScaler().fit(raw_target[:fit_end])
+            target = self.target_scaler_.transform(raw_target).ravel()
 
         self.model_ = build_network(
             self.kind, prepared.shape[1:], n_outputs, self.task, self.units, self.dropout, self.l2, self.learning_rate
@@ -188,7 +190,8 @@ class KerasEstimator:
     def predict(self, X) -> np.ndarray:
         if self.task == "classification":
             return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
-        return self.model_.predict(self.transform_inputs(X), verbose=0).ravel()
+        predicted = self.model_.predict(self.transform_inputs(X), verbose=0)
+        return self.target_scaler_.inverse_transform(predicted).ravel()
 
     def __getstate__(self):
         state = self.__dict__.copy()

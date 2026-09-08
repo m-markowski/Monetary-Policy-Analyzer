@@ -363,6 +363,7 @@ with tab_setup:
         st.markdown(interpret.MONTHLY_RATIONALE)
         st.markdown(interpret.CV_HELP)
 
+    k_auto = None
     data = build_task_data(monthly, economy, task, spec, horizon, observed_through=get_master(economy, mtime).index[-1])
     if data is None:
         st.warning(
@@ -399,14 +400,12 @@ with tab_setup:
         )
         st.caption(row_note)
 
-        preview_splits = pipeline.chronological_split(
-            X,
-            y,
-            preset=split_preset,
-            gap=horizon,
-        )
-        n_train = len(preview_splits["Train"][0])
-        k_auto = pipeline.auto_k_features(n_train, X.shape[1], gap=horizon)
+        try:
+            preview_splits = pipeline.chronological_split(X, y, preset=split_preset, gap=horizon)
+            n_train = len(preview_splits["Train"][0])
+            k_auto = pipeline.auto_k_features(n_train, X.shape[1], gap=horizon)
+        except ValueError as exc:
+            st.info(f"This setup cannot be trained: {exc} Choose a shorter horizon or a different split.")
 
         if task == "classification":
             st.caption(interpret.class_balance_note(y))
@@ -427,15 +426,16 @@ with tab_setup:
             help=interpret.LEAKAGE_HELP,
         )
 
-        st.caption(
-            f"Not all {X.shape[1]} features reach a model. A one-feature-at-a-time F-test ranks them "
-            f"by their association with the target, and only the top {k_auto} are kept. During "
-            "cross-validation, selection is re-fit on each fold's training months only to avoid "
-            "leakage. The final pipeline re-fits it on the full training split; those selected "
-            "features are used on dev and test and listed in Diagnostics. k is limited by the "
-            "smallest expanding CV training fold after its horizon gap, keeping about 4 training "
-            "rows per selected feature."
-        )
+        if k_auto is not None:
+            st.caption(
+                f"Not all {X.shape[1]} features reach a model. A one-feature-at-a-time F-test ranks them "
+                f"by their association with the target, and only the top {k_auto} are kept. During "
+                "cross-validation, selection is re-fit on each fold's training months only to avoid "
+                "leakage. The final pipeline re-fits it on the full training split; those selected "
+                "features are used on dev and test and listed in Diagnostics. k is limited by the "
+                "smallest expanding CV training fold after its horizon gap, keeping about 4 training "
+                "rows per selected feature."
+            )
 
 training_options = {"metric": metric, "budget": budget, "neural": include_neural}
 current_sig = (
@@ -452,7 +452,7 @@ current_sig = (
 )
 
 bundle = st.session_state.get("mdl_bundle")
-if (bundle is None or bundle["sig"] != current_sig) and X is not None and y is not None:
+if (bundle is None or bundle["sig"] != current_sig) and X is not None and y is not None and k_auto is not None:
     key = registry.cache_key(economy, task, target_name, horizon, split_preset)
     loaded = registry.load_artifacts(key, signature=registry.data_signature(X, y), training_options=training_options)
     if loaded is not None:
@@ -499,8 +499,8 @@ with tab_train:
         "on the full current data (for example after the dataset grows) or after changing the setup; "
         "it overwrites the saved models."
     )
-    if X is None or y is None:
-        st.info("Complete the Setup tab first.")
+    if X is None or y is None or k_auto is None:
+        st.info("Choose a valid configuration in Setup before training.")
     else:
         if st.button("Train / refit on current data", type="primary", key="mdl_train"):
             splits = pipeline.chronological_split(X, y, preset=split_preset, gap=horizon)
@@ -519,10 +519,11 @@ with tab_train:
             except ValueError as exc:
                 st.error(str(exc))
                 st.stop()
-            st.caption(
-                f"Using {len(folds)} of 5 expanding CV folds; {skipped} omitted because the "
-                "training classes or validation metric are not available in that period."
-            )
+            if task == "classification":
+                st.caption(
+                    f"Using {len(folds)} of 5 expanding CV folds; {skipped} omitted because the "
+                    "training classes or validation metric are not available in that period."
+                )
             sklearn_names = list(pipeline.model_roster(task))
             n_sklearn = len(sklearn_names)
             queue = sklearn_names + (["MLP", "LSTM"] if include_neural else [])
@@ -907,7 +908,10 @@ with tab_diag:
                 + " "
                 + interpret.skill_verdict(skill)
             )
-            st.caption(interpret.residual_verdict(y_show, pred_show), help=interpret.RESIDUAL_HELP)
+            st.caption(
+                interpret.residual_verdict(y_show, pred_show, horizon=bundle["horizon"]),
+                help=interpret.RESIDUAL_HELP,
+            )
 
         scoring = evaluate.CV_SCORING[bundle["metric"]]
         native = explain.native_importance(model, X_test.columns)
@@ -931,11 +935,9 @@ with tab_diag:
                 "feature cannot move the predictions."
             )
         st.caption(
-            "Both charts ignore the split selector above. Permutation importance is always "
-            "measured on the dev months: the model never fitted them, so the score drop from "
-            "shuffling a feature reflects genuine out-of-sample signal, while the test months "
-            "stay reserved for the final scores. Native importance comes from the fitted model "
-            "itself, so no split is involved."
+            "These charts ignore the split selector above. Permutation importance uses Dev: "
+            "held-out data for base models, but fitting data for Blend and Stack. Native importance "
+            "comes from the fitted model itself."
         )
         imp_row = st.columns(2)
         with imp_row[0]:
@@ -950,8 +952,8 @@ with tab_diag:
                     "Every coefficient is zero. Cross-validation picked a penalty strong enough to "
                     "shrink them all away, leaving an intercept-only model that always predicts the "
                     "training mean - a legitimate outcome when no feature reliably beats noise on "
-                    "this target. Check its Skill column on the leaderboard: an intercept-only "
-                    "model adds essentially nothing over the no-change baseline."
+                    "this target. Check its Skill column to see whether that constant prediction "
+                    "beats the no-change baseline."
                 )
             else:
                 show_figure(plots.importance_bar(native, title=None), interpret.importance_sentence(native))
@@ -1371,8 +1373,9 @@ with tab_forecast:
             st.caption(interpret.ljung_box_verdict(diag))
             if acc is not None:
                 st.caption(
-                    f"The order above was chosen, and this specification fit, on data ending {acc['holdout']} "
-                    "months before the last observation; forecasting those months gives the holdout RMSE/MAE "
+                    ("The order was set manually. " if override else "The automatic order excludes the holdout. ")
+                    + f"The backtest fit ends {acc['holdout']} months before the last observation; "
+                    "forecasting those months gives the holdout RMSE/MAE "
                     f"above (series' own units), versus in-sample one-step errors of {acc['train_rmse']:,.3f} / "
                     f"{acc['train_mae']:,.3f}. The forecast below then refits the same specification on the "
                     "full history - there is no held-out data behind that fit."
@@ -1404,7 +1407,7 @@ with tab_forecast:
         change = monthly_fc[garch_col].diff().dropna()
         gsearch = garch_search(economy, garch_col, mtime)
         if gsearch is None:
-            st.info("GARCH needs at least 50 monthly changes for this series.")
+            st.info("No reliable GARCH order was found on the pre-holdout history; trying GARCH(1, 1).")
             best_pq = (1, 1)
         else:
             best_pq = tuple(int(v) for v in gsearch["best"])
@@ -1417,7 +1420,7 @@ with tab_forecast:
             st.dataframe(gboard, hide_index=True, width="stretch")
         res = garch_fit(economy, garch_col, best_pq, mtime)
         if res is None:
-            st.info("GARCH needs at least 50 monthly changes for this series.")
+            st.info("GARCH could not be fitted reliably. At least 50 non-constant monthly changes are required.")
         else:
             fc = econometrics.garch_forecast(res, steps)
             gacc = garch_accuracy(economy, garch_col, best_pq, mtime)
@@ -1436,6 +1439,8 @@ with tab_forecast:
                     f"{gacc['rmse']:,.3f} / MAE {gacc['mae']:,.3f}. The displayed model refits that order on "
                     "the full history."
                 )
+            else:
+                st.caption("The holdout accuracy check is unavailable because its training fit was not reliable.")
             close = {**fc, "fitted_volatility": fc["fitted_volatility"].iloc[-12:]}
             show_figure(
                 plots.garch_volatility_plot(

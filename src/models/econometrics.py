@@ -188,12 +188,13 @@ def fit_garch(series: pd.Series, p: int = 1, q: int = 1, dist: str = "t"):
         The fitted arch result, or None if the fit fails or n < 50.
     """
     values = pd.Series(series).dropna()
-    if len(values) < 50:
+    if len(values) < 50 or values.nunique() < 2 or not np.isfinite(values).all():
         return None
     try:
         model = arch_model(values, mean="Constant", vol="GARCH", p=p, q=q, dist=dist, rescale=True)
-        result = model.fit(disp="off")
-        if result.convergence_flag != 0 or not np.isfinite(result.aic):
+        with warnings.catch_warnings():
+            result = model.fit(disp="off", show_warning=False)
+        if result.convergence_flag != 0 or not np.isfinite(result.aic) or not np.isfinite(result.params).all():
             return None
         return result
     except (ValueError, np.linalg.LinAlgError):
@@ -413,9 +414,8 @@ def garch_backtest(series: pd.Series, p: int = 1, q: int = 1, dist: str = "t", h
     if len(values) - holdout < 50:
         return None
     train, test = values.iloc[:-holdout], values.iloc[-holdout:]
-    try:
-        res = arch_model(train, mean="Constant", vol="GARCH", p=p, q=q, dist=dist, rescale=True).fit(disp="off")
-    except (ValueError, np.linalg.LinAlgError):
+    res = fit_garch(train, p=p, q=q, dist=dist)
+    if res is None:
         return None
     scale = getattr(res, "scale", 1.0)
     volatility = np.sqrt(res.forecast(horizon=holdout, reindex=False).variance.iloc[-1].to_numpy()) / scale

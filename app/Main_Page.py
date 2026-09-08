@@ -97,17 +97,23 @@ reload_clicked = col_a.button(label, type="primary")
 full_refresh = col_b.checkbox("Force full refresh (ignore cache, repull all history)")
 
 if reload_clicked:
-    metas = {}
+    metas = load_metadata() or {}
     with st.status("Fetching from FRED + yfinance...", expanded=True) as status:
         for eco in ECONOMIES:
             st.write(f"Building {eco.upper()} dataset...")
-            metas[eco] = build_and_save(eco, full_refresh=full_refresh)
+            try:
+                metas[eco] = build_and_save(eco, full_refresh=full_refresh)
+                if all(name in metas for name in ECONOMIES):
+                    save_metadata(metas)
+            except (RuntimeError, ValueError, OSError) as exc:
+                status.update(label="Data refresh stopped", state="error")
+                st.error(str(exc))
+                st.stop()
             m = metas[eco]
             st.write(
                 f"{eco.upper()} ready: {m['working_start']} - {m['working_end']} "
                 f"({m['n_rows']:,} rows, {m['n_features']} features)"
             )
-        save_metadata(metas)
         status.update(label="Data loaded and cached", state="complete")
     get_master.clear()
     st.rerun()
