@@ -977,16 +977,6 @@ with tab_diag:
                 )
         with st.expander("How to read feature importance"):
             st.markdown(interpret.IMPORTANCE_HELP)
-            if perm_raw is not None:
-                st.caption(
-                    f"Raw results for {bundle['metric']}: positive means shuffling made the result worse; "
-                    "negative means it improved; zero means no measured change. The chart shows only "
-                    "positive values, scaled to 100. A small value may reflect random variation. "
-                    "Inputs removed by the model's filter have zero effect."
-                )
-                order = perm_raw.abs().sort_values(ascending=False).index
-                table = perm_raw.reindex(order).rename("Mean score drop").rename_axis("Feature").reset_index()
-                st.dataframe(table.style.format({"Mean score drop": "{:+.6g}"}), hide_index=True, width="stretch")
 
         base_imp = native if native is not None and native.gt(0).any() else perm
         if base_imp is not None and base_imp.gt(0).any():

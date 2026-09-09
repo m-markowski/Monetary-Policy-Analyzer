@@ -241,8 +241,8 @@ DIAG_SPLIT_HELP = (
     "out-of-sample read and the default. Train shows the fit on the very months the model was "
     "fitted to - compare it with Test: a much better Train read means the model memorised its "
     "training window (overfitting). Dev is the tuning split (ensemble weights, the winner pick and, when "
-    "the toggle is on, the Youden class thresholds); inspect it to see the data those choices were based on, "
-    "and note it spans the 2020 COVID shock, so every model reads structurally worse there. "
+    "the toggle is on, the Youden class thresholds); inspect it to see the data those choices were based on. "
+    "Different economic periods can make each split easier or harder to predict. "
     "'Train + Dev + Test' shows the whole sample as one path."
 )
 
@@ -308,12 +308,6 @@ ROC_AUC_OVR_NOTE = (
     "in the evaluated period, its AUC cannot be calculated."
 )
 
-COVID_DEV_NOTE = (
-    "Dev scores may be structurally worse when the 2020 COVID shock falls within the dev window - or "
-    "any other split - as the dataset grows and time-based split boundaries shift. This is an era effect, "
-    "not a model fault; dev-based ranking remains usable if the shock affects models similarly."
-)
-
 BASELINE_HELP_REG = (
     "The 'Baseline: no change' row is a zero-change random walk: it predicts the series does not "
     "move over the horizon, the classic macro-forecasting yardstick. Read RMSE/MAE - a typical "
@@ -341,11 +335,9 @@ CONFUSION_HELP = (
 )
 
 IMPORTANCE_HELP = (
-    "Feature importance shows which inputs matter most, scaled to 0-100. Native importance comes "
-    "from the model itself. Permutation importance shuffles one feature on Dev and checks whether "
-    "the model gets worse: a larger drop means the feature was more useful. The chart shows only "
-    "positive importance; zero and negative results remain in the raw table. For Blend and Stack, "
-    "Dev was also used to fit the ensemble, so these results are descriptive."
+    "Native importance comes from the fitted model. Permutation importance checks whether shuffling "
+    "an input makes predictions worse on Dev. The chart shows positive effects, with the largest "
+    "scaled to 100. For Blend and Stack, Dev was also used to fit the ensemble."
 )
 
 GROUP_IMPORTANCE_HELP = (

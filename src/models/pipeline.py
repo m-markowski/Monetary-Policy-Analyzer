@@ -189,11 +189,8 @@ def model_roster(task: str, random_state: int = SEED, class_weight: bool = True)
 
     return {
         "Logistic regression": {
-            "estimator": LogisticRegression(solver="saga", max_iter=5000, class_weight=cw, random_state=random_state),
-            "space": {
-                "model__C": ("float", 1e-3, 1e2, True),
-                "model__penalty": ("cat", ["l1", "l2"]),
-            },
+            "estimator": LogisticRegression(solver="lbfgs", max_iter=5000, class_weight=cw, random_state=random_state),
+            "space": {"model__C": ("float", 1e-3, 1e2, True)},
             "needs_scaling": True,
         },
         "SVM": {
