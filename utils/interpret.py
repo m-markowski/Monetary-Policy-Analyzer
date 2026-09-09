@@ -302,10 +302,10 @@ ENSEMBLE_HELP = (
 )
 
 ROC_AUC_OVR_NOTE = (
-    "How the single ROC-AUC number is formed: the three-class problem is turned into three "
-    "one-vs-rest binary problems (Hike vs the rest, Hold vs the rest, Cut vs the rest), an AUC is "
-    "computed for each and the three are averaged with equal weight (macro) - so the rare Hike/Cut "
-    "classes count as much as the dominant Hold."
+    "ROC-AUC is calculated separately for Hike, Hold and Cut by comparing each class with all "
+    "other outcomes, then averaging the available class scores equally. This means rare Hike/Cut "
+    "classes matter just as much as Hold. If a class does not appear together with other outcomes "
+    "in the evaluated period, its AUC cannot be calculated."
 )
 
 COVID_DEV_NOTE = (
@@ -341,10 +341,11 @@ CONFUSION_HELP = (
 )
 
 IMPORTANCE_HELP = (
-    "Feature importance ranks the inputs, scaled to 0-100. Native importance comes from tree "
-    "splits or linear coefficients. Permutation importance shuffles one feature and measures "
-    "the score drop on Dev. Dev is held out for base models but is used to fit Blend and Stack, "
-    "so their permutation results are descriptive rather than an independent check."
+    "Feature importance shows which inputs matter most, scaled to 0-100. Native importance comes "
+    "from the model itself. Permutation importance shuffles one feature on Dev and checks whether "
+    "the model gets worse: a larger drop means the feature was more useful. The chart shows only "
+    "positive importance; zero and negative results remain in the raw table. For Blend and Stack, "
+    "Dev was also used to fit the ensemble, so these results are descriptive."
 )
 
 GROUP_IMPORTANCE_HELP = (
@@ -957,7 +958,7 @@ def residual_verdict(y_true, y_pred, horizon: int = 1) -> str:
 
     parts = []
 
-    if spread > 0 and abs(bias) > 0.1 * spread:
+    if abs(bias) > 0.1 * spread:
         direction = "over-predicts" if bias < 0 else "under-predicts"
         parts.append(f"a systematic bias (it {direction} on average)")
 

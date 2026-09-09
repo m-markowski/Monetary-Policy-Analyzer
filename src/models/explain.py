@@ -6,6 +6,7 @@ from sklearn.inspection import partial_dependence, permutation_importance
 from sklearn.metrics import get_scorer
 
 from config.settings import SEED
+from src.models.evaluate import regression_metrics
 
 
 def final_estimator(model):
@@ -122,22 +123,24 @@ def permutation_importance_scores(
     model, X, y, scoring=None, n_repeats: int = 10, random_state: int = SEED
 ) -> pd.Series:
     """
-    Permutation importance on a held-out split, scaled to 0-100.
+    Mean signed score drops from shuffling each input on the supplied split.
 
     Model-agnostic, so it also covers non-linear SVMs and neural networks,
-    which have no native feature importance. Negative drops are clipped to zero.
+    which have no native feature importance. Positive drops mean worse shuffled
+    predictions; negative drops mean better shuffled predictions.
     Blend/Stack fall back to a plain shuffle loop because sklearn's implementation requires
     a fit method they do not have.
 
     Args:
         model: A fitted estimator or Pipeline.
-        X, y: Split to measure importance on (use valid or test, never train).
-        scoring: sklearn scoring string; the estimator's default if None.
+        X, y: Evaluation split. Dev is held out for base models, but fits Blend/Stack.
+        scoring: sklearn scoring string or callable; the estimator's score if None.
         n_repeats (int): Number of shuffles per feature.
         random_state (int): Seed.
 
     Returns:
-        pd.Series: 0-100 importances, largest first.
+        pd.Series: Signed mean drops in scorer units, largest first. For negated
+        error scorers, a positive drop is an increase in error.
     """
     try:
         with parallel_config(backend="threading"):
@@ -147,9 +150,17 @@ def permutation_importance_scores(
         drops = result.importances_mean
     except TypeError:
         # The loop is single-threaded and each score call re-predicts the whole base
-        # roster, so cap the repeats; the 0-100 relative ranking is stable at 5.
+        # roster, so keep the manual path to at most five repeats.
         n_repeats = min(n_repeats, 5)
-        scorer = get_scorer(scoring) if isinstance(scoring, str) else scoring
+        if scoring in ("neg_root_mean_squared_error", "neg_mean_absolute_error"):
+            metric = "RMSE" if scoring == "neg_root_mean_squared_error" else "MAE"
+
+            def scorer(estimator, frame, target):
+                return -regression_metrics(target, estimator.predict(frame))[metric]
+        else:
+            scorer = get_scorer(scoring) if isinstance(scoring, str) else scoring
+        if scorer is None:
+            raise ValueError("Pass an explicit scorer for an estimator without sklearn scoring support.") from None
         base = scorer(model, X, y)
         rng = np.random.default_rng(random_state)
         X_perm = X.copy()
@@ -161,7 +172,7 @@ def permutation_importance_scores(
                 scores.append(scorer(model, X_perm, y))
             X_perm[col] = X[col]
             drops[j] = base - np.mean(scores)
-    return normalize_importance(np.clip(drops, 0, None), X.columns)
+    return pd.Series(drops, index=X.columns, dtype=float).sort_values(ascending=False)
 
 
 def feature_group_importance(importance: pd.Series, group_of, all_groups=None) -> pd.Series:

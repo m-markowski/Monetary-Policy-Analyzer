@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 from datetime import datetime
@@ -9,7 +10,23 @@ import pandas as pd
 from config.settings import PROJECT_ROOT
 
 MODELS_DIR = PROJECT_ROOT / "data" / "models"
-MODEL_SCHEMA_VERSION = 3
+
+
+def model_signature() -> str:
+    """Fingerprint model code, page orchestration, configuration and locked dependencies."""
+    paths = [
+        *sorted((PROJECT_ROOT / "src" / "models").glob("*.py")),
+        PROJECT_ROOT / "app" / "pages" / "3_Modelling_and_prediction.py",
+        PROJECT_ROOT / "config" / "settings.py",
+        PROJECT_ROOT / "config" / "config.yaml",
+        PROJECT_ROOT / "pyproject.toml",
+        PROJECT_ROOT / "uv.lock",
+    ]
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.relative_to(PROJECT_ROOT).as_posix().encode("utf-8") + b"\0")
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n") + b"\0")
+    return digest.hexdigest()
 
 
 def slugify(text: str) -> str:
@@ -100,7 +117,7 @@ def build_metadata(
         dict: Metadata including a 'trained_at' timestamp.
     """
     metadata = {
-        "schema_version": MODEL_SCHEMA_VERSION,
+        "model_signature": model_signature(),
         "economy": economy,
         "task": task,
         "target": target,
@@ -168,7 +185,7 @@ def load_artifacts(
         return None
     try:
         metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-        if metadata.get("schema_version") != MODEL_SCHEMA_VERSION:
+        if metadata.get("model_signature") != model_signature():
             return None
         if signature is not None and is_stale(metadata, signature):
             return None

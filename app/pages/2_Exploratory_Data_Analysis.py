@@ -395,10 +395,7 @@ with tab_overview:
                 if "Log return (%)" in allowed_transforms(family_of(c), c):
                     returns_df[c] = prepare_series(df[c], "Log return (%)", monthly, date_range)
                 else:
-                    st.info(
-                        f"**{c}** is measured in %, so a log return is not meaningful for it; "
-                        "its panel shows the level only."
-                    )
+                    st.info(f"Log returns are not meaningful for **{c}**; its panel shows the level only.")
             fig = levels_with_overlay(levels_df, returns_df, chart_features, title="")
         else:
             plot_df = pd.DataFrame(
@@ -537,10 +534,9 @@ with tab_rel:
             "Collapse to monthly",
             key="rel_monthly",
             help=(
-                "Sample one value per month instead of daily. Level co-movement barely "
-                "changes, but the cointegration and partial-correlation tests below stop "
-                "treating thousands of forward-filled daily repeats as independent data, "
-                "so their p-values become honest. Turn off for the full daily series."
+                "Sample one value per month instead of daily to reduce repeated observations. "
+                "Dependence over time can remain, so test results still need care. "
+                "Turn off for the full daily series."
             ),
         )
         st.caption(
@@ -984,10 +980,9 @@ with tab_regime:
 
 with tab_structure:
     st.caption(
-        "The other tabs use rule-based regimes (policy stance, curve, recession). Here the "
-        "data is left to reveal its own structure: collinear features are compressed with PCA, "
-        "then K-Means groups the observations into data-driven regimes. Everything runs on standardised "
-        "levels. Read it as description, not a forecast."
+        "The other tabs use rule-based regimes (policy stance, curve, recession). Here K-Means "
+        "groups observations by their standardised feature levels, while PCA provides a simpler view "
+        "of the same data. Clustering does not use the PCA projection. Read it as description, not a forecast."
     )
 
     if len(base_columns) < 3:

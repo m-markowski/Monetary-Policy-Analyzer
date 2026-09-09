@@ -375,30 +375,11 @@ with tab_setup:
         X, y, target_column = data["X"], data["y"], data["target_column"]
         st.markdown("**The modelling data**")
         span = f"{X.index.min():%Y-%m} to {X.index.max():%Y-%m}"
-        st.caption(f"{X.shape[0]} monthly rows, {X.shape[1]} features, {span}.")
-
-        n_months = len(monthly)
-        lag_cost = max(TARGET_LAGS)
-        labelled_ceiling = max(n_months - lag_cost - horizon, 0)
-        additional_drops = max(labelled_ceiling - X.shape[0], 0)
-
-        row_note = (
-            f"The row count and date range move with the horizon. The source contains {n_months} monthly "
-            f"snapshots: the first {lag_cost} month(s) cannot be used until all target lags are available, "
-            f"and the last {horizon} month(s) normally have no fully observed {horizon}-month-ahead outcome "
-            f"yet, so they cannot be labelled for supervised training. This leaves up to "
-            f"{labelled_ceiling} labelled rows before feature completeness is considered."
+        st.caption(f"{len(X)} monthly examples, {X.shape[1]} candidate inputs, {span}.")
+        st.caption(
+            "Models learn from months with a known later outcome. Scenario uses the latest complete "
+            "inputs, even when that outcome is not known yet."
         )
-        if additional_drops > 0:
-            row_note += (
-                f" A further {additional_drops} row(s) are unavailable because required feature values "
-                "are missing or, when applicable, the final source month is still incomplete."
-            )
-        row_note += (
-            " The most recent feature-complete row is retained separately for Scenario, where an observed "
-            "future outcome is not required."
-        )
-        st.caption(row_note)
 
         try:
             preview_splits = pipeline.chronological_split(X, y, preset=split_preset, gap=horizon)
@@ -407,39 +388,46 @@ with tab_setup:
         except ValueError as exc:
             st.info(f"This setup cannot be trained: {exc} Choose a shorter horizon or a different split.")
 
-        if task == "classification":
-            st.caption(interpret.class_balance_note(y))
-            st.caption(
-                f"The class mix also shifts with the horizon: the label compares the rate {horizon} "
-                "month(s) ahead with today, and cumulative moves grow over a longer window, so fewer "
-                "months stay inside the Hold deadband."
+        with st.expander("How these data are prepared"):
+            n_months, lag_cost = len(monthly), max(TARGET_LAGS)
+            labelled_ceiling = max(n_months - lag_cost - horizon, 0)
+            additional_drops = max(labelled_ceiling - len(X), 0)
+            row_note = (
+                f"{n_months} source months: the first {lag_cost} supply past target values; the last "
+                f"{horizon} do not yet have a {horizon}-month outcome. This leaves up to "
+                f"{labelled_ceiling} examples."
             )
-        else:
-            st.caption(interpret.target_change_note(econometrics.stationarity(y), target_name))
-
-        st.caption(
-            "Excluded from the inputs: the target's own column, every feature engineered from it "
-            "(moving averages, returns, vols, changes) and any spread it is a component of. Its past "
-            f"values at lags {', '.join(str(lag) for lag in TARGET_LAGS)} months are added back "
-            "deliberately - they are observed before the prediction is made, so they are honest "
-            "autoregressive features, not leakage.",
-            help=interpret.LEAKAGE_HELP,
-        )
-
-        if k_auto is not None:
+            if additional_drops:
+                row_note += f" Missing inputs or an unfinished final month remove {additional_drops} more."
+            st.caption(row_note + " Changing the horizon changes the available rows and dates.")
             st.caption(
-                f"Not all {X.shape[1]} features reach a model. A one-feature-at-a-time F-test ranks them "
-                f"by their association with the target, and only the top {k_auto} are kept. During "
-                "cross-validation, selection is re-fit on each fold's training months only to avoid "
-                "leakage. The final pipeline re-fits it on the full training split; those selected "
-                "features are used on dev and test and listed in Diagnostics. k is limited by the "
-                "smallest expanding CV training fold after its horizon gap, keeping about 4 training "
-                "rows per selected feature."
+                "The current target, its derived features and related spreads/components are excluded. "
+                f"Past target values from {', '.join(str(lag) for lag in TARGET_LAGS)} months earlier "
+                "are kept because they were already known.",
+                help=interpret.LEAKAGE_HELP,
             )
+            if k_auto is not None:
+                st.caption(
+                    f"Standard models keep {k_auto} of {X.shape[1]} inputs, ranked one at a time by "
+                    "their link to the outcome (an F-test). Selection uses only training data in each "
+                    "validation round, then the full Train split. Diagnostics lists the final choices. "
+                    "The limit allows about four training rows per input in the smallest round, after "
+                    "leaving the horizon gap."
+                )
+                if include_neural:
+                    st.caption("MLP and LSTM use all candidate inputs, without this filter.")
+            if task == "classification":
+                st.caption(interpret.class_balance_note(y))
+                st.caption(
+                    f"Hike/Hold/Cut compares today's rate with the rate {horizon} months later. "
+                    "Changing that horizon can change the class balance."
+                )
+            else:
+                st.caption(interpret.target_change_note(econometrics.stationarity(y), target_name))
 
 training_options = {"metric": metric, "budget": budget, "neural": include_neural}
 current_sig = (
-    registry.MODEL_SCHEMA_VERSION,
+    registry.model_signature(),
     budget,
     economy,
     task,
@@ -684,22 +672,41 @@ with tab_train:
                         best, metric, board.loc[best, f"Valid {metric}"], board.loc[best, f"Test {metric}"]
                     )
                 )
-                if bundle["task"] == "classification" and metric.startswith("ROC-AUC"):
-                    st.caption(interpret.ROC_AUC_OVR_NOTE)
+                test_score = board.loc[best, f"Test {metric}"]
                 benchmark = None
-                if bundle["task"] == "regression" and metric in ("RMSE", "MAE"):
+                if bundle["task"] == "regression":
                     benchmark = board.loc["Baseline: no change", f"Test {metric}"]
-                verdict = interpret.metric_verdict(metric, board.loc[best, f"Test {metric}"], benchmark=benchmark)
-                if verdict:
-                    st.caption(f"On the test set - {verdict}")
-                if bundle.get("skill") is not None:
-                    st.caption(interpret.skill_verdict(bundle["skill"].loc[best, "Test Skill vs naive"]))
-                note = interpret.overfit_note(
-                    board.loc[best, f"Train {metric}"], board.loc[best, f"Test {metric}"], metric
-                )
-                if note:
-                    st.caption(note)
-                st.caption(interpret.COVID_DEV_NOTE)
+                    if pd.notna(benchmark) and benchmark > 0:
+                        difference = 1 - test_score / benchmark
+                        if abs(difference) < 0.005:
+                            comparison = "about the same as"
+                        else:
+                            direction = "lower" if difference > 0 else "higher"
+                            comparison = f"{abs(difference):.0%} {direction} than"
+                        st.caption(f"On Test, {metric} is {comparison} predicting no change. Lower is better.")
+                    else:
+                        st.caption(f"Test {metric}: {test_score:.3f}, in the target's units. Lower is better.")
+                else:
+                    st.caption(interpret.metric_verdict(metric, test_score))
+
+                with st.expander("How to read this result"):
+                    if bundle["task"] == "regression":
+                        st.caption(interpret.metric_verdict(metric, test_score, benchmark=benchmark))
+                    elif metric.startswith("ROC-AUC"):
+                        st.caption(interpret.ROC_AUC_OVR_NOTE)
+                    if bundle.get("skill") is not None:
+                        st.caption(interpret.skill_verdict(bundle["skill"].loc[best, "Test Skill vs naive"]))
+                    note = interpret.overfit_note(board.loc[best, f"Train {metric}"], test_score, metric)
+                    if note:
+                        st.caption(note)
+                    dev_index = bundle["splits"]["Valid"][0].index
+                    period_note = (
+                        f"Dev covers {dev_index.min():%Y-%m} to {dev_index.max():%Y-%m}. "
+                        "Different economic periods can make the splits easier or harder to predict."
+                    )
+                    if (dev_index.year == 2020).any():
+                        period_note += " This Dev window includes the 2020 COVID shock."
+                    st.caption(period_note)
 
             metric_order = [metric] + [m for m in task_metrics if m != metric]
             display_cols = [f"{s} {m}" for m in metric_order for s in ("Train", "Valid", "Test")]
@@ -924,7 +931,8 @@ with tab_diag:
                     )
                 except Exception:
                     perm_cache[model_name] = None
-        perm = perm_cache[model_name]
+        perm_raw = perm_cache[model_name]
+        perm = explain.normalize_importance(perm_raw.clip(lower=0), perm_raw.index) if perm_raw is not None else None
         st.markdown("**Feature importance**")
         kept = explain.selected_features(model, X_test.columns)
         if len(kept) < X_test.shape[1]:
@@ -957,12 +965,28 @@ with tab_diag:
                 show_figure(plots.importance_bar(native, title=None), interpret.importance_sentence(native))
         with imp_row[1]:
             st.markdown("**Permutation**")
-            if perm is not None:
-                show_figure(plots.importance_bar(perm, title=None), interpret.importance_sentence(perm))
-            else:
+            if perm is None:
                 st.caption("Permutation importance could not be computed for this model on this split.")
+            elif perm.gt(0).any():
+                positive = perm[perm > 0]
+                show_figure(plots.importance_bar(positive, title=None), interpret.importance_sentence(positive))
+            else:
+                st.caption(
+                    "Shuffling individual inputs did not make predictions worse on Dev in this check. "
+                    "This can happen even when the model used those inputs during training."
+                )
         with st.expander("How to read feature importance"):
             st.markdown(interpret.IMPORTANCE_HELP)
+            if perm_raw is not None:
+                st.caption(
+                    f"Raw results for {bundle['metric']}: positive means shuffling made the result worse; "
+                    "negative means it improved; zero means no measured change. The chart shows only "
+                    "positive values, scaled to 100. A small value may reflect random variation. "
+                    "Inputs removed by the model's filter have zero effect."
+                )
+                order = perm_raw.abs().sort_values(ascending=False).index
+                table = perm_raw.reindex(order).rename("Mean score drop").rename_axis("Feature").reset_index()
+                st.dataframe(table.style.format({"Mean score drop": "{:+.6g}"}), hide_index=True, width="stretch")
 
         base_imp = native if native is not None and native.gt(0).any() else perm
         if base_imp is not None and base_imp.gt(0).any():
