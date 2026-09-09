@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy import stats
-from statsmodels.stats.diagnostic import lilliefors
+from statsmodels.stats.diagnostic import lilliefors, normal_ad
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from statsmodels.tsa.stattools import adfuller, coint
@@ -47,37 +47,41 @@ def describe_extended(series: pd.Series) -> pd.Series | None:
 
 
 def normality_battery(series: pd.Series, alpha: float = 0.05) -> pd.DataFrame | None:
-    """
-    Run several normality tests and report them side by side.
+    """Run four normality diagnostics; failure to reject is not proof of normality.
 
-    Jarque-Bera, Lilliefors and Anderson-Darling always run; Shapiro-Wilk is skipped above 5000 points,
-    where its p-value is unreliable. The Anderson-Darling p-value is interpolated from SciPy's critical-value
-    tables, so it is capped at 0.15.
+    Anderson-Darling uses statsmodels.normal_ad for an unknown mean and variance.
+    Its approximate p-value is not clipped to SciPy's interpolation interval.
+    Shapiro-Wilk is skipped above 5000 observations because its p-value may be
+    inaccurate there. All test readings remain conditional on their assumptions;
+    none of these routines corrects for serial dependence in the supplied series.
 
     Args:
-        series (pd.Series): Numeric variable to test.
-        alpha (float): Significance level for the `normal` verdict.
+        series (pd.Series): Numeric observations; missing values are dropped.
+        alpha (float): Significance level in (0, 1); reject when p < alpha.
 
     Returns:
-        pd.DataFrame | None: One row per test (test, statistic, p_value, normal),
-        or None if fewer than eight non-missing observations exist.
+        pd.DataFrame | None: Columns test, statistic, p_value and normal, where
+        normal means failure to reject. None for fewer than eight usable values,
+        non-finite inputs or a constant series.
     """
+    if not 0 < alpha < 1:
+        raise ValueError("alpha must lie strictly between 0 and 1.")
     values = series.dropna().to_numpy()
     if values.size < 8 or not np.isfinite(values).all() or np.ptp(values) == 0:
         return None
 
     jb = stats.jarque_bera(values)
     ll_stat, ll_p = lilliefors(values, dist="norm")
-    ad = stats.anderson(values, dist="norm", method="interpolate")
+    ad_stat, ad_p = normal_ad(values)
 
     rows = [
-        ("Jarque-Bera", jb.statistic, jb.pvalue, jb.pvalue > alpha),
-        ("Lilliefors", ll_stat, ll_p, ll_p > alpha),
-        ("Anderson-Darling", ad.statistic, ad.pvalue, ad.pvalue > alpha),
+        ("Jarque-Bera", jb.statistic, jb.pvalue, jb.pvalue >= alpha),
+        ("Lilliefors", ll_stat, ll_p, ll_p >= alpha),
+        ("Anderson-Darling", ad_stat, ad_p, ad_p >= alpha),
     ]
     if values.size <= 5000:
         sw = stats.shapiro(values)
-        rows.append(("Shapiro-Wilk", sw.statistic, sw.pvalue, sw.pvalue > alpha))
+        rows.append(("Shapiro-Wilk", sw.statistic, sw.pvalue, sw.pvalue >= alpha))
 
     return pd.DataFrame(rows, columns=["test", "statistic", "p_value", "normal"])
 
@@ -117,12 +121,11 @@ def compare_groups(
     min_count: int = 3,
 ) -> dict | None:
     """
-    Compare a variable across groups, auto-selecting the appropriate test.
+    Compare a variable across groups, automatically choosing the test.
 
-    Checks the parametric preconditions (per-group normality via Shapiro/Jarque-
-    Bera, equal variances via Levene), then routes to a t-test/ANOVA when they
-    hold and to Mann-Whitney/Kruskal-Wallis otherwise, with a matching post-hoc
-    for three or more groups.
+    Normality and equal variance are checked first. When these assumptions hold,
+    a t-test or ANOVA is used; otherwise Mann-Whitney or Kruskal-Wallis is used.
+    For ANOVA with three or more groups, Tukey HSD provides pairwise comparisons.
 
     Args:
         series (pd.Series): Numeric variable to compare.
@@ -283,11 +286,11 @@ def partial_correlation(
     """
     Correlation between two variables while controlling for covariates.
 
-    Both variables are residualised on the controls (an intercept plus every
-    covariate) by ordinary least squares; the correlation of the residuals is the
-    partial correlation. The Spearman variant rank-transforms the columns first,
-    then applies the same residualisation. The two-sided p-value comes from the
-    Student-t approximation with n - 2 - k degrees of freedom (k = control count).
+    Both variables are residualised on the controls by ordinary least squares,
+    and their residuals are then correlated. The Spearman variant rank-transforms
+    the data first. The two-sided p-value uses a Student-t approximation with
+    degrees of freedom based on the effective number of independent controls.
+    Serial dependence is not accounted for.
 
     Args:
         df (pd.DataFrame): Source dataset.

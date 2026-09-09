@@ -483,9 +483,9 @@ if (bundle is None or bundle["sig"] != current_sig) and X is not None and y is n
 with tab_train:
     st.caption(interpret.LEADERBOARD_HELP)
     st.caption(
-        "Trained models auto-save and reload on their own. Click Train / refit only to rerun the search "
-        "on the full current data (for example after the dataset grows) or after changing the setup; "
-        "it overwrites the saved models."
+        "Compatible trained models are saved and reloaded automatically. Train / refit reruns "
+        "training on the current split: base models use Train, while ensemble layers use Dev. "
+        "Saved artifacts are then updated, and data or code changes may require retraining."
     )
     if X is None or y is None or k_auto is None:
         st.info("Choose a valid configuration in Setup before training.")
@@ -994,8 +994,9 @@ with tab_diag:
 
         st.markdown("**SHAP contributions (tree and boosting models)**")
         st.caption(
-            "SHAP is always computed on the test months, whatever the selector above says: these "
-            "values explain individual predictions rather than produce a score, so nothing leaks."
+            "SHAP always explains predictions on the Test window, regardless of the selector above. "
+            "It does not refit the model, but repeatedly using Test explanations to redesign the model "
+            "would weaken Test as an independent evaluation."
         )
         if explain.is_tree_model(model):
             class_ix = 0
@@ -1085,12 +1086,17 @@ with tab_diag:
 
         st.markdown("**Econometric baseline**")
         st.caption(interpret.ECON_BASELINE_HELP_REG if diag_task == "regression" else interpret.ECON_BASELINE_HELP_CLF)
+        selection_note = (
+            "OLS uses up to 10 features most correlated with the target."
+            if diag_task == "regression"
+            else "Multinomial logit uses up to 10 features selected by univariate F-score."
+        )
+
         st.caption(
-            "The baseline is judged on the very months it was estimated from: it is "
-            "fit once on the full monthly frame - including the months the ML models keep as dev and "
-            "test - so its fit numbers are optimistic and not comparable with the ML test scores, "
-            "and the split selector at the top does not affect this panel. To stay well-conditioned "
-            "it enters only the 10 features most correlated with the target."
+            "This baseline is fitted and evaluated on the full labelled monthly sample, so its "
+            "results are in-sample and not directly comparable with ML Test scores. The split "
+            "selector does not affect this panel. " + selection_note + " "
+            "Treat p-values as exploratory because feature selection and time dependence are not adjusted for."
         )
         if diag_task == "regression":
             ols = econometrics.ols_baseline(bundle["X"], bundle["y"])
@@ -1102,13 +1108,10 @@ with tab_diag:
                 fit_cols[1].metric("Adj. R2", f"{ols['rsquared_adj']:.3f}")
                 fit_cols[2].metric("F p-value", interpret.format_pvalue(ols["f_pvalue"]))
                 st.caption(
-                    f"R2 = {ols['rsquared']:.2f}: the baseline explains {ols['rsquared']:.0%} of the "
-                    "in-sample variation of the forward change. A low value is the honest, expected "
-                    "reading here - monthly changes in macro series are mostly noise, and the change "
-                    "target was chosen deliberately because a level regression would fake a near-perfect "
-                    "R2 through shared trend alone. Judge the baseline on the F p-value (small = the "
-                    "features jointly beat an intercept-only model) and on which coefficients are "
-                    "significant, not on R2 alone."
+                    f"R2 = {ols['rsquared']:.2f}: this shows how well the baseline fits the forward changes "
+                    "in-sample. A low R2 means the selected features explain little of the variation, while a "
+                    "high R2 should still be checked against residual diagnostics and possible common trends. "
+                    "This is an explanatory fit measure, not an out-of-sample performance score."
                 )
                 st.dataframe(
                     ols["coefficients"].style.format(precision=4).map(significance_colour, subset=["p-value"]),
@@ -1447,10 +1450,10 @@ with tab_forecast:
             st.caption(interpret.garch_persistence_note(fc["persistence"]))
             if gacc is not None:
                 st.caption(
-                    f"Accuracy check: the order was chosen and the model fit without the last {gacc['holdout']} "
-                    f"months; its volatility forecast missed the realized absolute changes by RMSE "
-                    f"{gacc['rmse']:,.3f} / MAE {gacc['mae']:,.3f}. The displayed model refits that order on "
-                    "the full history."
+                    f"Holdout check: order selection and fitting exclude the last {gacc['holdout']} months. "
+                    "Forecast volatility is compared with absolute demeaned monthly changes as a rough proxy "
+                    f"for realized volatility: RMSE {gacc['rmse']:,.3f} / MAE {gacc['mae']:,.3f}. "
+                    "The displayed forecast refits the selected order on the full history."
                 )
             else:
                 st.caption("The holdout accuracy check is unavailable because its training fit was not reliable.")

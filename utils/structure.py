@@ -3,7 +3,6 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import adjusted_rand_score, silhouette_score
-from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
 
@@ -26,44 +25,6 @@ def standardize(frame: pd.DataFrame) -> pd.DataFrame | None:
         return None
     scaled = StandardScaler().fit_transform(usable)
     return pd.DataFrame(scaled, index=usable.index, columns=usable.columns)
-
-
-def hopkins_statistic(scaled: pd.DataFrame, sample_size: int | None = None, random_state: int = 0) -> float | None:
-    """
-    Hopkins statistic: does the data have any clustering tendency at all?
-
-    Compares nearest-neighbour distances of real points with those of uniform
-    random points drawn from the same bounding box. Values near 1 indicate strong
-    clustering structure, near 0.5 a uniform (structureless) cloud. Run before
-    clustering to confirm clusters are worth seeking.
-
-    Args:
-        scaled (pd.DataFrame): Standardised feature frame.
-        sample_size (int | None): Number of points sampled for the comparison.
-        random_state (int): Seed for reproducible sampling.
-
-    Returns:
-        float | None: The Hopkins statistic in [0, 1], or None if too few rows.
-    """
-    data = scaled.to_numpy()
-    n, d = data.shape
-    m = min(sample_size or max(50, n // 10), n - 1)  # ~10% of points, floor 50
-    if m < 5:
-        return None
-
-    rng = np.random.default_rng(random_state)
-    nbrs = NearestNeighbors(n_neighbors=2).fit(data)
-
-    idx = rng.choice(n, size=m, replace=False)
-    real_dist, _ = nbrs.kneighbors(data[idx])
-    w = real_dist[:, 1].sum()  # column 0 is the point itself (distance 0)
-
-    synthetic = rng.uniform(data.min(axis=0), data.max(axis=0), size=(m, d))
-    synth_dist, _ = nbrs.kneighbors(synthetic)
-    u = synth_dist[:, 0].sum()  # no self-distance here as synthetic samples are not in the training data
-
-    total = u + w
-    return float(u / total) if total > 0 else None
 
 
 def pca_summary(scaled: pd.DataFrame, n_components: int | None = None) -> dict | None:

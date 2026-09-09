@@ -36,7 +36,6 @@ from utils.stats import (
 )
 from utils.structure import (
     cluster_agreement,
-    hopkins_statistic,
     kmeans_labels,
     kmeans_sweep,
     pca_summary,
@@ -303,7 +302,6 @@ def run_structure(
     return {
         "frame": frame[scaled.columns],
         "scaled": scaled,
-        "hopkins": hopkins_statistic(scaled.drop_duplicates()),
         "pca": pca_summary(scaled),
         "sweep": kmeans_sweep(scaled),
     }
@@ -969,12 +967,11 @@ with tab_regime:
 
                 st.markdown(f"**Day counts: {reg_a} (rows) × {reg_b} (columns)**")
                 st.caption(
-                    f"Each cell counts the days in the selected range that were in both states "
+                    "Each cell counts the days in the selected range that were in both states "
                     f"at once (total {assoc['n']:,} days). This regime-vs-regime block is "
-                    f"deliberately kept on daily overlap and is not affected by 'Collapse to "
-                    f"monthly' (see the expander above for why), so these counts won't match "
-                    f"the observation counts in the top table, which samples the selected "
-                    f"variable monthly."
+                    "deliberately kept on daily overlap and is not affected by 'Collapse to "
+                    "monthly', so these counts won't match the observation counts in the top table, "
+                    "which samples the selected variable monthly."
                 )
                 st.dataframe(assoc["table"], width="stretch")
 
@@ -1042,9 +1039,12 @@ with tab_structure:
                 # Regime labels on the same index as the clustered rows.
                 regime_labels = {n: collapse_to_monthly(s) for n, s in regimes.items()} if struct_monthly else regimes
 
-                if bundle["hopkins"] is not None:
-                    st.markdown("**Clustering tendency**")
-                    st.caption(interpret.hopkins_verdict(bundle["hopkins"]), help=interpret.HOPKINS_HELP)
+                st.caption(
+                    "Clustering is a way to group similar observations, but the results can be influenced "
+                    "by trends and related features. Silhouette shows how clearly the groups are separated, "
+                    "but it does not prove that they are true economic regimes. Check the group profiles, "
+                    "sizes and different time periods before drawing conclusions."
+                )
 
                 st.markdown("**Principal components**")
                 left, right = st.columns(2)
@@ -1072,8 +1072,9 @@ with tab_structure:
                 if fig_sweep is not None:
                     st.plotly_chart(fig_sweep, width="stretch")
                 st.caption(
-                    f"Silhouette is highest at k = {best_k}. Use the elbow in inertia as a "
-                    "sanity check, then adjust k below if a different split is more interpretable."
+                    f"Silhouette is highest at k = {best_k} among the tested values. "
+                    "Treat this as a useful guide, not a definitive number of clusters; "
+                    "also compare inertia, cluster sizes and profiles."
                 )
                 if len(sweep) == 1:
                     k = best_k

@@ -11,35 +11,21 @@ KURTOSIS_HELP = (
 )
 
 MEAN_CI_HELP = (
-    "The average shown is the exact mean of the selected window. The confidence interval "
-    "is a different idea: it treats this window as one sample from the broader process that "
-    "generates the data and gives a plausible range for that process's mean. '95% confidence' "
-    "means ~95% of such intervals would contain the true process mean if sampling were repeated. "
-    "Caveat: financial series are autocorrelated, which makes the classic interval too narrow, so "
-    "read it as optimistic."
+    "The average is the exact mean of the selected observations. The confidence interval "
+    "estimates a plausible range for the underlying mean. Because time-series observations "
+    "may be correlated, the interval can be too narrow, so treat it as an approximate guide."
 )
 
 NORMALITY_GUIDE = (
-    "Each test asks the same question: *could this data plausibly come from a normal "
-    "(bell-curve) distribution?*\n\n"
-    "- **p-value** - the chance of seeing data this far from normal if it really were "
-    "normal. Small p = strong evidence *against* normality.\n"
-    "- **normal? (α)** - 'Yes' when p ≥ α (cannot rule out normal), 'No' when p < α "
-    "(reject normal).\n"
-    "- **Anderson-Darling** reports a p-value interpolated from its critical-value table, "
-    "so it is capped at 0.15 (larger values all read as 'clearly not rejected').\n"
-    "- **Shapiro-Wilk** is shown only for samples ≤ 5000; beyond that its p-value is "
-    "unreliable, so it is skipped.\n\n"
-    "*Caveat for this data:* these tests gain power with sample size. On the full daily "
-    "series (Collapse to monthly off) the huge, forward-filled sample flags tiny, harmless "
-    "departures, so almost everything tests as non-normal. Monthly sampling shrinks the "
-    "sample to a few hundred, so a rejection there is more likely a genuine departure - "
-    "usually the fat tails of financial returns. Either way, read the QQ plot, histogram "
-    "and skew/kurtosis for the practical picture.\n\n"
-    "*Note on time-series data:* even first-difference and return series can show "
-    "volatility clustering (large moves following large moves), which violates the "
-    "independence assumption. The tests remain useful diagnostics but treat the output "
-    "as approximate."
+    "These tests assess whether the sample is consistent with a normal distribution.\n\n"
+    "- **p-value** - small values provide evidence against normality; they are not the "
+    "probability that the data are normal.\n"
+    "- **normal?** - 'Yes' means normality is not rejected at the chosen α; it does not "
+    "prove that the distribution is normal.\n"
+    "- **Anderson-Darling** and **Shapiro-Wilk** provide complementary normality checks; "
+    "Shapiro-Wilk is skipped above 5000 observations because its p-value becomes unreliable.\n\n"
+    "With large or time-dependent samples, even small departures can be significant. "
+    "Use these tests together with the histogram, QQ/PP plots and skewness/kurtosis."
 )
 
 REGIME_AVAILABILITY_HELP = (
@@ -49,13 +35,10 @@ REGIME_AVAILABILITY_HELP = (
 )
 
 PARTIAL_P_HELP = (
-    "The p-value tests the null hypothesis that the partial correlation is zero - that "
-    "once the control variables are accounted for, X and Y have no linear association "
-    "left. A small p-value is evidence the leftover association is real rather than "
-    "chance. The larger the sample the more over-powered the test - on the daily series "
-    "(thousands of autocorrelated, forward-filled rows) p is almost always tiny, and "
-    "monthly sampling eases this; either way judge the relationship by the size of the "
-    "partial r, not by significance."
+    "The p-value tests whether the partial correlation could be zero after accounting "
+    "for the selected controls. A small value is evidence of an association, not causation. "
+    "Because time-series observations may be dependent, treat the p-value as approximate "
+    "and focus also on the sign and size of partial r."
 )
 
 OLS_HELP = (
@@ -84,8 +67,8 @@ GROUP_TEST_GUIDE = (
     "- **Which test is used (picked automatically):**\n"
     "    - It first checks whether each regime's values are roughly normally distributed and whether "
     "the regimes have a similar spread (variance).\n"
-    "    - If yes -> a **t-test** (two regimes) or **ANOVA** (three or more).\n"
-    "    - If no -> a rank-based **Mann-Whitney** (two regimes) or **Kruskal-Wallis** (three "
+    "    - If yes - a **t-test** (two regimes) or **ANOVA** (three or more).\n"
+    "    - If no - a rank-based **Mann-Whitney** (two regimes) or **Kruskal-Wallis** (three "
     "or more), which do not require a normal distribution but still assume independent observations.\n"
     "- **p-value** - the chance of seeing a difference this big if the regimes were truly "
     "identical. **p-value** less than α means the difference is unlikely to be chance alone.\n"
@@ -112,83 +95,46 @@ TUKEY_GUIDE = (
 )
 
 ASSOCIATION_GUIDE = (
-    "This measures whether two regime labels tend to occur together.\n\n"
-    "- **The table** counts the days falling into each combination.\n"
-    "- **Linked vs unrelated** - 'unrelated' means knowing one regime tells you nothing about "
-    "the other; 'linked' means some combinations happen far more (or less) often than chance "
-    "alone would produce.\n"
-    "- **p-value** - the chance of seeing a pattern this strong if the two were truly "
-    "unrelated. Below α they count as linked.\n"
-    "- **Cramér's V** - rescales the result to a 0-1 strength score, comparable across "
-    "tables: 0 = unrelated, 1 = one regime perfectly predicts the other. Rule of thumb: "
-    "under 0.1 negligible, 0.1-0.3 weak, 0.3-0.5 moderate, above 0.5 strong.\n"
-    "- **Why this stays daily:** the 'Collapse to monthly' toggle above governs the numeric "
-    "variable in the group-comparison test; this block is a separate analysis that compares "
-    "two regime labels directly, on their daily overlap. Collapsing to monthly would not "
-    "rescue the p-value anyway - a regime persists for months, so the labels are heavily "
-    "autocorrelated and the effective sample is far smaller than the row count at any "
-    "frequency.\n"
-    "- **Caveat:** because of that the p-value is almost always tiny whatever the frequency, "
-    "so judge by the strength (Cramér's V), not significance alone."
-)
-
-HOPKINS_HELP = (
-    "The Hopkins statistic asks whether the data has any clustering tendency before you "
-    "cluster it. It compares how close real points sit to their nearest neighbour against "
-    "how close uniformly random points (drawn from the same range) sit to the real data. "
-    "Near 0.5 the data is spread like noise (clusters would be arbitrary); near 1 points "
-    "bunch into dense groups worth clustering. Caveat for this data: on trending level data "
-    "Hopkins is biased high and should not be read as evidence of good clusters - judge separation "
-    "by silhouette."
+    "This panel shows how often two regime labels occur together.\n\n"
+    "- **The table** counts daily observations for each label combination.\n"
+    "- **p-value** tests whether the labels are independent, but time dependence can make "
+    "the result less reliable.\n"
+    "- **Cramer's V** measures association strength from 0 to 1; higher values mean a "
+    "stronger relationship. Treat common strength bands as rough guidelines.\n"
+    "- **Daily scope**: this analysis uses daily regime labels and is unaffected by the "
+    "monthly-collapse option above. Read the results as descriptive rather than definitive."
 )
 
 STRUCTURE_GUIDE = (
-    "- **PCA** - rebuilds the features as a few uncorrelated components ordered by how much "
-    "variation they capture; many overlapping macro and rate series collapse into a "
-    "readable 2D picture.\n"
-    "- **Loadings** - each component is a weighted blend of the original features; "
-    "the loading is that weight, roughly between -1 and +1. A large positive "
-    "loading means the feature rises strongly with the component; a large "
-    "negative one means it moves strongly the opposite way; near 0 means the feature "
-    "barely shapes that component. Read each component by the features with the biggest "
-    "absolute loadings - they name what the axis represents.\n"
-    "- **K-Means** - splits the observations into k groups so each observation sits with others most "
-    "similar to it; the result is a *data-driven* regime, found without the rule-based labels.\n"
-    "- **Levels, not returns** - structure is read on standardised levels, so a cluster is a "
-    "persistent state of the economy; neighbouring observations sharing a state is expected.\n"
+    "- **PCA** - reduces many standardised features to a few main dimensions, making the "
+    "overall structure easier to visualise. K-Means still uses the full selected feature set.\n"
+    "- **Loadings** - show which features shape each PCA component most. Larger absolute "
+    "values mean a stronger contribution; the sign shows direction.\n"
+    "- **K-Means** - groups observations with similar feature levels into data-driven clusters.\n"
+    "- **Interpretation** - clusters can highlight broad economic environments or periods, "
+    "but they should not be treated as proof of distinct economic regimes.\n"
 )
 
 CLUSTER_REGIME_HELP = (
-    "Two complementary measures describe how closely the data-driven clusters match a "
-    "rule-based regime classification. The Adjusted Rand Index (ARI) compares the two "
-    "partitions, correcting for chance (1 = identical, 0 = chance, negative = worse than "
-    "chance). Cramér's V measures the strength of association between cluster and regime "
-    "labels on a 0-1 scale. High values for both indicate that the clustering has recovered "
-    "the known regime structure. Note: ARI is less informative when comparing many clusters "
-    "with only a few regimes, as splitting one regime into multiple clusters lowers the "
-    "score even if the correspondence is clear. In such cases, Cramér's V is often the more "
-    "appropriate measure."
+    "ARI and Cramer's V compare the data-driven clusters with the rule-based regime labels. "
+    "Higher values mean stronger agreement, but neither measure proves that the clusters are "
+    "true economic regimes. Read them together with the contingency table, especially when "
+    "the numbers of clusters and regimes differ."
 )
 
 COINTEGRATION_HELP = (
-    "Two trending series can look strongly correlated in levels even when nothing links "
-    "them - the spurious-regression trap. The augmented Dickey-Fuller (ADF) test checks "
-    "whether each series is stationary (no persistent trend); most rates and macro levels "
-    "are not. The Engle-Granger test then regresses one series on the other and tests "
-    "whether the leftover residual is stationary: if it is, the pair is cointegrated - tied "
-    "together around a stable long-run equilibrium - and the level relationship is genuine. "
-    "If not, a high level correlation is most likely an artefact of shared trends. This is "
-    "why differencing is not used here: cointegration is defined on the levels themselves, "
-    "and on the forward-filled daily series a naive difference would in any case collapse "
-    "to mostly zeros."
+    "High correlation between trending series can be misleading. The app first checks "
+    "whether both series behave like I(1) processes using ADF tests on levels and first "
+    "differences, and runs Engle-Granger only when that condition is met. Evidence of "
+    "cointegration suggests a stable long-run relationship in levels, but not causation. "
+    "If the test is not run or does not reject, that alone does not prove the relationship is spurious."
 )
 
 MONTHLY_RATIONALE = (
-    "Modelling runs on a monthly view of the daily data (the month-end snapshot). The daily rows are mostly "
-    "forward-filled repeats of the same monthly value - keeping them would inflate the sample, leak across "
-    "the train/test split and make cross-validation meaningless. Monthly sampling removes that repetition but "
-    "leaves the trend and autocorrelation intact; that is handled by the targets themselves, which are forward changes "
-    "(regression) or direction labels (classification) rather than trending levels."
+    "Modelling uses monthly snapshots to avoid treating forward-filled daily repeats as "
+    "independent observations and to match the forecast horizon. Targets are forward changes "
+    "or direction labels, while chronological splits and horizon gaps reduce target overlap. "
+    "Trend and autocorrelation may remain, and the data are not reconstructed as real-time vintages."
 )
 
 SPLIT_HELP = (
@@ -222,10 +168,10 @@ METRIC_HELP = (
 )
 
 LEAKAGE_HELP = (
-    "Leakage happens when a model uses information that would not yet be available at prediction time. "
-    "To stay conservative, the target's own column and features derived from it are excluded. "
-    "Past target values can still be used as lags because they were already known when the prediction "
-    "is made, so they are valid autoregressive features rather than leakage."
+    "Leakage means using information that would not be available at prediction time. "
+    "The target and its directly derived features are excluded, while past target values "
+    "can be used as lags. As with other predictors, real-time validity still depends on "
+    "when the data were actually published and revised."
 )
 
 THRESHOLD_HELP = (
@@ -237,20 +183,17 @@ THRESHOLD_HELP = (
 )
 
 DIAG_SPLIT_HELP = (
-    "Choose which chronological split the diagnostics below are measured on. Test is the honest "
-    "out-of-sample read and the default. Train shows the fit on the very months the model was "
-    "fitted to - compare it with Test: a much better Train read means the model memorised its "
-    "training window (overfitting). Dev is the tuning split (ensemble weights, the winner pick and, when "
-    "the toggle is on, the Youden class thresholds); inspect it to see the data those choices were based on. "
-    "Different economic periods can make each split easier or harder to predict. "
-    "'Train + Dev + Test' shows the whole sample as one path."
+    "Choose which chronological split to use for diagnostics. Test is the default held-out "
+    "window, Train shows the fitting period, and Dev is used for model selection, ensemble "
+    "fitting and optional class thresholds. Comparing Train with Test can reveal overfitting, "
+    "while Train + Dev + Test shows the full sample rather than a single out-of-sample result."
 )
 
 LEADERBOARD_HELP = (
-    "Every model is scored on train, dev and test. Read the test column for real-world performance; "
-    "a model that is excellent on train but weak on test is overfitting. The winner badge marks the "
-    "base model with the best Dev value of the chosen scoring metric. Blend and Stack are excluded from "
-    "the pick: they are fit on the dev split, so their dev scores are partly in-sample."
+    "Base models are scored on Train, Dev and Test. The winner is chosen by the selected "
+    "Dev metric, while Test provides the final held-out comparison for this window. "
+    "Blend and Stack use Dev to fit their combination layer, so they are excluded from "
+    "the winner pick. A large Train-Test gap can indicate overfitting or changing data patterns."
 )
 
 HORIZON_HELP = (
@@ -264,17 +207,16 @@ HORIZON_HELP = (
 )
 
 TARGET_HELP = (
-    "Pick the series to forecast. Training uses direct multi-step forecasting: the model maps the "
-    "drivers observed in one month straight to this series' movement over the following months (the "
-    "chosen horizon) in a single step, rather than iterating month by month. Under the hood it "
-    "predicts the forward change - the near-stationary quantity - and the app adds that change back "
-    "to the latest observed value wherever a level is displayed."
+    "Pick the series to forecast. The model predicts its change over the chosen horizon "
+    "directly from the current predictors, rather than forecasting month by month. "
+    "Displayed levels are reconstructed by adding the predicted change to the latest observed value. "
+    "Using changes reduces trend effects but does not guarantee stationarity."
 )
 
 NEURAL_HELP = (
-    "The Keras nets (an MLP baseline and an LSTM) are heavy to fit and prone to overfit on this "
-    "dataset, and they rarely beat the gradient-boosted trees here, so they are opt-in. Turn them "
-    "on to showcase the deep-learning roster; expect the run to take noticeably longer."
+    "MLP and LSTM are optional because they take longer to train and can overfit the limited "
+    "monthly sample. They use a separate chronological validation block within Train for early "
+    "stopping. Their performance should be compared empirically with the other models."
 )
 
 CV_BUDGET_HELP = (
@@ -317,10 +259,9 @@ BASELINE_HELP_REG = (
 )
 
 BASELINE_HELP_CLF = (
-    "Two naive baselines anchor the board. 'Majority class' always predicts the most common "
-    "training label; 'trailing momentum' extrapolates the sign of the rate move over the previous "
-    "h months - the strongest baseline that uses only information available at prediction time. The "
-    "hard-label baselines output no probabilities, so their ROC-AUC is blank."
+    "Two simple baselines provide reference points. Majority class always predicts the most "
+    "common Train label, while trailing momentum follows the direction of the previous h-month "
+    "rate move. Neither produces probabilities, so ROC-AUC is not available."
 )
 
 ROC_HELP = (
@@ -353,9 +294,9 @@ GROUP_IMPORTANCE_HELP = (
 )
 
 SHAP_HELP = (
-    "SHAP values decompose a single prediction into per-feature contributions that add up to the gap "
-    "between that prediction and the average prediction, so you can see which features pushed a given "
-    "decision up or down. Shown for tree/boosting models via the exact TreeExplainer."
+    "SHAP shows how each feature contributes to a model prediction relative to a reference value. "
+    "Positive and negative values indicate which features push the prediction higher or lower. "
+    "Shown for supported tree/boosting models; the contributions describe the model, not causal effects."
 )
 
 PDP_HELP = (
@@ -406,10 +347,10 @@ SCENARIO_HELP = (
 )
 
 FORECAST_HELP = (
-    "These are classic time-series models fit on a single series' own past - target-lags only, with "
-    "none of the Setup feature matrix or the trained ML models. Only the economy carries over, to decide "
-    "which dataset's series you can forecast. Pick a series and a horizon; the shaded band is the confidence "
-    "interval and it widens further out, because the further ahead the less certain the forecast."
+    "These univariate models use only the selected series' own history, independently of the "
+    "Setup features and trained ML models. ARIMA forecasts future values with a prediction "
+    "interval, while GARCH forecasts future volatility. The horizon only controls how far ahead "
+    "the forecast extends."
 )
 
 ARIMA_HELP = (
@@ -424,12 +365,10 @@ ARIMA_HELP = (
 )
 
 GARCH_HELP = (
-    "GARCH models the variance of a series rather than its level: it captures volatility clustering, "
-    "where turbulent months tend to follow turbulent months. The app prepares the input for you - it "
-    "always fits the monthly change of the chosen series, because GARCH assumes a roughly zero-mean "
-    "input: one that fluctuates around zero with no trend, so all the systematic movement is in the "
-    "size of the swings rather than their direction. The chart reads as how large a typical monthly "
-    "move is, month by month, and how large the model expects it to be ahead."
+    "GARCH models how the volatility of monthly changes evolves over time, capturing periods "
+    "when large moves tend to cluster together. The chart shows the expected size of future "
+    "fluctuations in the series' own units, not their direction or future level. "
+    "The model order is selected before the holdout period and then refitted on the full history for the forecast."
 )
 
 
@@ -579,25 +518,13 @@ def kurtosis_verdict(excess_kurtosis: float) -> str:
 
 
 def normality_verdict(battery: pd.DataFrame, alpha: float) -> str:
-    """
-    Summarise the normality battery as a single mixed/reject/plausible verdict.
-
-    Args:
-        battery (pd.DataFrame): Output of `stats.normality_battery` (has a
-            boolean `normal` column, one row per test).
-        alpha (float): Significance level used for the verdict.
-
-    Returns:
-        str: One sentence stating how many tests reject normality.
-    """
+    """Count individual rejections without treating the battery as a combined test."""
     n_tests = len(battery)
-    n_normal = int(battery["normal"].sum())
-    if n_normal == n_tests:
-        return f"All {n_tests} tests fail to reject normality at α={alpha:g}; normal is plausible."
-    if n_normal == 0:
-        return f"All {n_tests} tests reject normality at α={alpha:g}; treat as non-normal."
+    n_reject = int((~battery["normal"].astype(bool)).sum())
     return (
-        f"{n_tests - n_normal} of {n_tests} tests reject normality at α={alpha:g}; evidence is mixed, lean non-normal."
+        f"{n_reject} of {n_tests} tests reject normality at alpha={alpha:g}. "
+        "This is a summary of separate diagnostics, not a combined significance test. "
+        "Failure to reject does not establish normality, especially for dependent observations."
     )
 
 
@@ -652,29 +579,22 @@ def cramers_v_verdict(v: float) -> str:
         strength = "moderate"
     else:
         strength = "strong"
-    return f"Strength of the link (Cramér's V) = {v:.2f}: {strength} (0 = unrelated, 1 = lockstep)."
-
-
-def hopkins_verdict(h: float) -> str:
-    """One-sentence reading of a Hopkins statistic (0.5 random, 1 clusterable)."""
-    if h >= 0.75:
-        reading = "strong clustering tendency, clusters are worth seeking"
-    elif h >= 0.6:
-        reading = "some clustering tendency"
-    else:
-        reading = "little structure, close to a uniform cloud, so clusters may be arbitrary"
-    return f"Hopkins = {h:.2f}: {reading} (0.5 = random, 1 = highly clusterable)."
+    return f"Strength of the link (Cramér's V) = {v:.2f}: {strength} (0 = no association, 1 = maximal association for this table)."
 
 
 def silhouette_verdict(score: float) -> str:
-    """One-sentence reading of a mean silhouette score (-1 to 1)."""
+    """One-sentence interpretation of a mean silhouette score."""
     if score >= 0.5:
-        reading = "clusters are well separated"
+        reading = "clusters are fairly well separated"
     elif score >= 0.25:
-        reading = "clusters are weak and overlap"
+        reading = "some cluster structure is visible, but groups overlap"
     else:
-        reading = "little real separation, the grouping is mostly arbitrary"
-    return f"Silhouette = {score:.2f}: {reading} (1 = tight and distinct, 0 = overlapping)."
+        reading = "clusters show weak separation and substantial overlap"
+
+    return (
+        f"Silhouette = {score:.2f}: {reading}. "
+        "Higher values mean clearer separation; these thresholds are only a rule of thumb."
+    )
 
 
 def cluster_agreement_sentence(ari: float, regime_name: str) -> str:
@@ -1005,50 +925,37 @@ def group_importance_sentence(group_importance: pd.Series | None) -> str:
 
 
 def stationarity_verdict(res: dict | None, name: str) -> str:
-    """Plain reading of an `econometrics.stationarity` ADF result, for the forecast tab."""
+    """Plain reading of an ADF stationarity test."""
     if res is None:
         return f"Not enough observations to test {name} for stationarity."
+
     p = format_pvalue(res["p_value"])
+
     if res["stationary"]:
-        return (
-            f"ADF on {name}: stationary (p = {p}), so no differencing is required and the automatic "
-            "search can keep d = 0."
-        )
+        return f"ADF on {name}: rejects the unit-root hypothesis (p = {p}), which supports stationarity."
+
     return (
-        f"ADF on {name}: non-stationary (p = {p}) - a trend or unit root remains. The automatic order "
-        "search handles this for you: the differencing order d it selects removes the trend before the "
-        "AR and MA parts are fit."
+        f"ADF on {name}: does not reject the unit-root hypothesis (p = {p}), "
+        "so the series may require differencing. The automatic search selects d separately."
     )
 
 
 def target_change_note(res: dict | None, name: str) -> str:
-    """
-    Stationarity reading for the forward-change regression target.
-
-    The engine models the forward change of the series, not its trending level, and
-    the change construction is itself the classic stationarity fix - so the ADF here
-    is a confirmation that the modelled target is well behaved, not a decision point.
-
-    Args:
-        res (dict | None): An `econometrics.stationarity` result on the change target.
-        name (str): Display name of the target.
-
-    Returns:
-        str: One-line reading of the ADF result for the change target.
-    """
+    """Plain ADF reading for the forward-change target."""
     if res is None:
         return f"Not enough observations to test the {name} target for stationarity."
+
     p = format_pvalue(res["p_value"])
+
     if res["stationary"]:
         return (
-            f"ADF on the modelled target - the forward change of {name}: stationary (p = {p}). "
-            "Modelling the change rather than the trending level is what keeps the target well "
-            "behaved; the level is only reconstructed for display."
+            f"ADF on the forward change of {name}: rejects the unit-root hypothesis "
+            f"(p = {p}), which supports stationarity."
         )
+
     return (
-        f"ADF on the modelled target - the forward change of {name}: still non-stationary (p = {p}). "
-        "The change construction mitigates the level's persistence rather than fully removing it "
-        "here, so judge the fit on the held-out test score."
+        f"ADF on the forward change of {name}: does not reject the unit-root hypothesis "
+        f"(p = {p}). Using changes can reduce trend effects, but does not guarantee stationarity."
     )
 
 
@@ -1063,51 +970,46 @@ def ljung_box_verdict(diag: dict, alpha: float = 0.05) -> str:
 
 
 def garch_persistence_note(persistence: float) -> str:
-    """Explain the shape of the volatility forecast from the estimated GARCH persistence."""
-    if persistence >= 0.97:
-        return (
-            f"Estimated persistence (α+β) = {persistence:.2f}: volatility shocks decay very slowly, so "
-            "the forecast stays close to the current volatility level - a near-flat line is the genuine "
-            "model output here."
+    """Plain reading of estimated GARCH persistence."""
+    prefix = f"Estimated persistence (α+β) = {persistence:.2f}: "
+
+    if persistence >= 1:
+        return prefix + (
+            "volatility is extremely persistent and the model does not imply reversion to a finite long-run variance."
         )
-    return (
-        f"Estimated persistence (α+β) = {persistence:.2f}: volatility shocks fade at this rate month to "
-        "month, so the forecast reverts toward the series' long-run volatility over the horizon."
+
+    if persistence >= 0.97:
+        return prefix + ("volatility shocks are highly persistent and may fade only slowly.")
+
+    return prefix + (
+        "volatility shocks tend to fade over time, with variance reverting toward "
+        "its long-run level under the fitted model."
     )
 
 
 def ols_assumptions_note(ols: dict) -> str:
-    """Plain reading of the OLS residual diagnostics (Durbin-Watson, Jarque-Bera, condition number)."""
+    """Plain summary of OLS residual diagnostics."""
     dw = ols["durbin_watson"]
     if dw < 1.5:
-        dw_read = f"Durbin-Watson {dw:.2f} (below 1.5) suggests positively autocorrelated residuals"
+        dw_read = f"Durbin-Watson {dw:.2f} suggests positive residual autocorrelation"
     elif dw > 2.5:
-        dw_read = f"Durbin-Watson {dw:.2f} (above 2.5) suggests negatively autocorrelated residuals"
+        dw_read = f"Durbin-Watson {dw:.2f} suggests negative residual autocorrelation"
     else:
-        dw_read = f"Durbin-Watson {dw:.2f} is near 2, so little residual autocorrelation"
-    jb_read = (
-        "residuals depart from normality" if ols["jarque_bera_p"] < 0.05 else "residuals are consistent with normality"
-    )
+        dw_read = f"Durbin-Watson {dw:.2f} is near 2, suggesting little first-order autocorrelation"
+
+    jb_read = "rejects residual normality" if ols["jarque_bera_p"] < 0.05 else "does not reject residual normality"
+
     cond = ols["condition_number"]
     if cond < 30:
-        cond_read = "the condition number is low, so multicollinearity is not a concern."
+        cond_read = "low"
     elif cond < 100:
-        cond_read = (
-            "the condition number is moderate - some multicollinearity, so individual coefficients "
-            "are less precisely pinned down, though the overall fit is unaffected."
-        )
-    elif cond < 1000:
-        cond_read = (
-            "the condition number is high - strong multicollinearity, so individual coefficient "
-            "sizes and signs are unstable and should be read with caution."
-        )
+        cond_read = "moderate"
     else:
-        cond_read = (
-            "the condition number is extreme - the entered features are close to linearly "
-            "dependent, so individual coefficients are not trustworthy even where the overall fit "
-            "is fine."
-        )
+        cond_read = "high"
+
     return (
-        f"{dw_read}; {jb_read} (JB p = {format_pvalue(ols['jarque_bera_p'])}); {cond_read} "
-        f"Rule of thumb: below 30 fine, 30-100 moderate, above 100 problematic."
+        f"{dw_read}. Jarque-Bera {jb_read} "
+        f"(p = {format_pvalue(ols['jarque_bera_p'])}). "
+        f"The condition number is {cond:.1f} ({cond_read}); higher values can indicate "
+        "unstable coefficients due to collinearity or scaling."
     )
