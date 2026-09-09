@@ -1,10 +1,13 @@
 import os
 import tempfile
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils import ClassifierTags, RegressorTags, Tags
 from sklearn.utils.class_weight import compute_class_weight
 
 from config.settings import SEED
@@ -12,6 +15,14 @@ from config.settings import SEED
 # Quiet TF logs
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+
+# Temporary compatibility filter for scalar conversion inside Keras/TensorFlow.
+warnings.filterwarnings(
+    "ignore",
+    message=r"Conversion of an array with ndim > 0 to a scalar is deprecated",
+    category=DeprecationWarning,
+    module=r"(?:keras|tensorflow)(?:\.|$)",
+)
 
 
 def make_sequences(values: np.ndarray, lookback: int) -> np.ndarray:
@@ -75,7 +86,7 @@ def build_network(kind, input_shape, n_outputs, task, units, dropout, l2, learni
     return model
 
 
-class KerasEstimator:
+class KerasEstimator(BaseEstimator):
     """
     sklearn-style wrapper around a small Keras network (MLP / LSTM).
 
@@ -114,6 +125,20 @@ class KerasEstimator:
         self.batch_size = batch_size
         self.class_weight = class_weight
         self.random_state = random_state
+
+    def __sklearn_tags__(self) -> Tags:
+        tags = super().__sklearn_tags__()
+        tags.target_tags.required = True
+        if self.task == "classification":
+            tags.estimator_type = "classifier"
+            tags.classifier_tags = ClassifierTags()
+        else:
+            tags.estimator_type = "regressor"
+            tags.regressor_tags = RegressorTags()
+        return tags
+
+    def __sklearn_is_fitted__(self) -> bool:
+        return hasattr(self, "model_")
 
     def transform_inputs(self, X: pd.DataFrame) -> np.ndarray:
         if self.kind != "lstm":

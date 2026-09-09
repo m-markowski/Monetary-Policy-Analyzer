@@ -1,15 +1,13 @@
-import warnings
-
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
-    balanced_accuracy_score,
     confusion_matrix,
     f1_score,
     log_loss,
     mean_absolute_error,
     precision_recall_fscore_support,
+    recall_score,
     roc_auc_score,
     roc_curve,
     root_mean_squared_error,
@@ -40,13 +38,11 @@ def argmax_f1_scorer(estimator, X, y) -> float:
 
 
 def argmax_balanced_scorer(estimator, X, y) -> float:
-    """Balanced accuracy of the shared probability-argmax operating point."""
+    """Mean recall of classes present in y, matching balanced accuracy."""
     proba = np.asarray(estimator.predict_proba(X))
     classes = np.asarray(getattr(estimator, "classes_", np.arange(proba.shape[1])))
     predicted = classes[np.argmax(proba, axis=1)]
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message="y_pred contains classes not in y_true")
-        return float(balanced_accuracy_score(y, predicted))
+    return float(recall_score(y, predicted, labels=np.unique(y), average="macro", zero_division=0))
 
 
 REGRESSION_METRICS = ("RMSE", "MAE")
@@ -97,11 +93,8 @@ def classification_metrics(y_true, y_pred, labels) -> dict:
     )
     per_class = pd.DataFrame({"Precision": prec, "Recall": rec, "F1": f1, "Support": support}, index=labels)
     cm = confusion_matrix(y_true, y_pred, labels=labels)
-    with warnings.catch_warnings():
-        # A small chronological split can miss a predicted class entirely; sklearn
-        # warns and scores that class's recall as 0, which is the intended read.
-        warnings.filterwarnings("ignore", message="y_pred contains classes not in y_true")
-        balanced = float(balanced_accuracy_score(y_true, y_pred))
+    # Balanced accuracy averages recall only over classes observed in this split.
+    balanced = float(np.mean(rec[support > 0]))
     return {
         "Accuracy": float(accuracy_score(y_true, y_pred)),
         "Balanced accuracy": balanced,
@@ -191,8 +184,8 @@ def youden_thresholds(y_true, y_proba, labels) -> dict:
         labels (list): Ordered label set matching the probability columns.
 
     Returns:
-        dict: Label -> probability threshold maximising TPR - FPR (0.5 when a
-        class is degenerate in the validation fold).
+        dict: Label -> probability threshold maximising TPR - FPR. Uses 0.5
+        when the class is absent, constant, or has no positive Youden gain.
     """
     y_true = np.asarray(y_true)
     y_proba = np.asarray(y_proba, dtype=float)
@@ -203,7 +196,9 @@ def youden_thresholds(y_true, y_proba, labels) -> dict:
             thresholds[lab] = 0.5
             continue
         fpr, tpr, thr = roc_curve(binary, y_proba[:, j])
-        thresholds[lab] = float(thr[int(np.argmax(tpr - fpr))])
+        gain = tpr - fpr
+        best = int(np.argmax(gain))
+        thresholds[lab] = float(thr[best]) if gain[best] > 0 and np.isfinite(thr[best]) else 0.5
     return thresholds
 
 

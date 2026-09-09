@@ -949,11 +949,9 @@ with tab_diag:
                 )
             elif native.eq(0).all():
                 st.caption(
-                    "Every coefficient is zero. Cross-validation picked a penalty strong enough to "
-                    "shrink them all away, leaving an intercept-only model that always predicts the "
-                    "training mean - a legitimate outcome when no feature reliably beats noise on "
-                    "this target. Check its Skill column to see whether that constant prediction "
-                    "beats the no-change baseline."
+                    "All native importance scores are zero, so the model does not provide a useful "
+                    "feature ranking here. Check permutation importance and the baseline comparison "
+                    "for a clearer view of which features contribute to predictive performance."
                 )
             else:
                 show_figure(plots.importance_bar(native, title=None), interpret.importance_sentence(native))
@@ -1179,9 +1177,10 @@ with tab_scenario:
         # Driver options and the anchor move with economy/task/target/horizon/data, not with
         # scoring or split choices; reset the controlled scenario widgets only when those change.
         st.caption(
-            f"This evaluation model was fitted through {bundle['splits']['Train'][0].index[-1]:%Y-%m}. "
+            f"Base models are fitted on Train, which ends in {bundle['splits']['Train'][0].index[-1]:%Y-%m}. "
+            "Blend and Stack additionally use Dev to fit their combination layer. "
             f"The current data snapshot ends on {get_master(economy, mtime).index[-1]:%Y-%m-%d}. "
-            "Scenario does not refit the model on Dev or Test, and a month-end label may denote a partial month."
+            "Scenario uses the fitted models without refitting; a month-end label may denote a partial month."
         )
         scn_sig = (economy, task, target_name, horizon, mtime)
         if st.session_state.get("mdl_scn_sig") != scn_sig or "mdl_scn_drivers" not in st.session_state:

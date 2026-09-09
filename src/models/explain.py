@@ -94,8 +94,9 @@ def native_importance(model, feature_names) -> pd.Series | None:
     """
     Model-native feature importance (tree importances or |coefficients|).
 
-    Coefficients are averaged over classes for multiclass linear models. When the
-    pipeline selected a subset of features, the scores align to the survivors.
+    When an estimator exposes multiple coefficient rows, absolute coefficients
+    are averaged across them. Scores align to the features retained by the
+    pipeline's selector.
 
     Args:
         model: A fitted estimator or Pipeline.
@@ -123,8 +124,8 @@ def permutation_importance_scores(
     """
     Permutation importance on a held-out split, scaled to 0-100.
 
-    Model-agnostic, so it covers the estimators without a native importance
-    (SVM, neural). Negative drops are clipped to zero.
+    Model-agnostic, so it also covers non-linear SVMs and neural networks,
+    which have no native feature importance. Negative drops are clipped to zero.
     Blend/Stack fall back to a plain shuffle loop because sklearn's implementation requires
     a fit method they do not have.
 

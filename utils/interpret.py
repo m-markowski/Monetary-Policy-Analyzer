@@ -192,9 +192,10 @@ MONTHLY_RATIONALE = (
 )
 
 SPLIT_HELP = (
-    "The data is split in time order (no shuffling) into train, dev and test. Train fits the models; "
-    "dev picks the class thresholds and blend weights, and steers early stopping for the neural nets "
-    "- kept separate so none of those choices peeks at the test set. Because a row's target is realised "
+    "The data is split in time order (no shuffling) into train, dev and test. Train fits the base models; "
+    "dev selects the winner, fits blend weights and the stacking meta-model, and optionally selects "
+    "classification thresholds. Neural early stopping uses a separate validation block inside Train, "
+    "with its own horizon gap. None of these choices uses Test. Because a row's target is realised "
     "`horizon` months later, the last `horizon` rows before every boundary are purged from the earlier "
     "split. Presets keep dev and test roughly equal in size."
 )

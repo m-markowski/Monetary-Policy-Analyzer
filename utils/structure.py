@@ -114,7 +114,7 @@ def kmeans_sweep(scaled: pd.DataFrame, k_min: int = 2, k_max: int = 8, random_st
 
     Returns:
         pd.DataFrame | None: One row per k with 'inertia' and 'silhouette',
-        indexed by k; None if there are too few rows for the range.
+        indexed by k; None if no candidate has a valid silhouette score.
     """
     data = scaled.to_numpy()
     top = min(k_max, data.shape[0] - 1, len(np.unique(data, axis=0)))
@@ -125,17 +125,13 @@ def kmeans_sweep(scaled: pd.DataFrame, k_min: int = 2, k_max: int = 8, random_st
     for k in range(k_min, top + 1):
         model = KMeans(n_clusters=k, random_state=random_state, n_init=10)
         labels = model.fit_predict(data)
-        rows.append(
-            {
-                "k": k,
-                "inertia": float(model.inertia_),
-                # sample to reduce computation cost
-                "silhouette": float(
-                    silhouette_score(data, labels, sample_size=min(2000, len(data)), random_state=random_state)
-                ),
-            }
-        )
-    return pd.DataFrame(rows).set_index("k")
+        try:
+            score = float(silhouette_score(data, labels, sample_size=min(2000, len(data)), random_state=random_state))
+        except ValueError:
+            # A subsample can miss a very small cluster, making silhouette undefined.
+            continue
+        rows.append({"k": k, "inertia": float(model.inertia_), "silhouette": score})
+    return pd.DataFrame(rows).set_index("k") if rows else None
 
 
 def kmeans_labels(scaled: pd.DataFrame, k: int, random_state: int = 0) -> dict | None:
@@ -150,7 +146,7 @@ def kmeans_labels(scaled: pd.DataFrame, k: int, random_state: int = 0) -> dict |
     Returns:
         dict | None: 'labels' (1-based cluster id per date, categorical),
         'silhouette', 'inertia' and 'sizes' (count per cluster);
-         None if k is invalid for the sample.
+        None if k or the silhouette sample is invalid.
     """
     data = scaled.to_numpy()
     if not 2 <= k <= min(data.shape[0] - 1, len(np.unique(data, axis=0))):
@@ -159,11 +155,13 @@ def kmeans_labels(scaled: pd.DataFrame, k: int, random_state: int = 0) -> dict |
     model = KMeans(n_clusters=k, random_state=random_state, n_init=10)
     raw = model.fit_predict(data)
     labels = pd.Series(raw + 1, index=scaled.index, name="cluster").astype("category")
+    try:
+        score = float(silhouette_score(data, labels, sample_size=min(2000, len(data)), random_state=random_state))
+    except ValueError:
+        return None
     return {
         "labels": labels,
-        "silhouette": float(
-            silhouette_score(data, labels, sample_size=min(2000, len(data)), random_state=random_state)
-        ),  # sample to reduce computation cost
+        "silhouette": score,
         "inertia": float(model.inertia_),
         "sizes": labels.value_counts().sort_index(),
     }
