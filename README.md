@@ -6,7 +6,7 @@ A local Python/Streamlit application for **US and euro-area macroeconomic and fi
 
 Instead of stitching together downloads, cleaning scripts and separate notebooks, users can explore the economic backdrop, compare forecasts against simple baselines, and inspect what drives a prediction.
 
-
+<img width="1475" height="720" alt="scenario" src="https://github.com/user-attachments/assets/9a3ffc9c-2316-4f27-9a81-bbf933cea82f" />
 
 *Scenario analysis with adjustable inputs. Screenshots show example runs, not live forecasts or a fixed benchmark.*
 
@@ -17,19 +17,19 @@ Instead of stitching together downloads, cleaning scripts and separate notebooks
 
 The highlighted base model is selected on the Dev dataset.
 
-
+<img width="1342" height="802" alt="leaderboard" src="https://github.com/user-attachments/assets/ac70ac9c-89d2-4aa2-8535-6a5214b7a324" />
 
 ### Feature importance
 
 Scaled bars show which inputs contributed most to the model's prediction.
 
-
+<img width="1472" height="757" alt="importance" src="https://github.com/user-attachments/assets/5605baa7-2e99-4c0a-a686-752e6e59bf72" />
 
 ### Forecasting a single series
 
 ARIMA/SARIMA projections include a model-based 95% prediction interval.
 
-
+<img width="1455" height="582" alt="forecast" src="https://github.com/user-attachments/assets/b823d3b0-dac9-4096-a474-ddc1f3d0a0c1" />
 
 </details>
 
