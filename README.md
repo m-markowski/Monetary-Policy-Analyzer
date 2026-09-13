@@ -6,6 +6,17 @@ A local Python/Streamlit application for **US and euro-area macroeconomic and fi
 
 Instead of stitching together downloads, cleaning scripts and separate notebooks, users can explore the economic backdrop, compare forecasts against simple baselines, and inspect what drives a prediction.
 
+## Run locally
+
+The launcher and locked environment support Windows 10/11 only. No preinstalled Python is needed.
+
+1. Clone the repository, or use **Code > Download ZIP** and extract it.
+2. Create a FRED account and generate your own [API key](https://fred.stlouisfed.org/docs/api/api_key.html).
+3. Double-click **`start.bat`** and enter the key when prompted. The launcher handles local Python 3.12, dependencies, key validation and startup checks, then opens your browser.
+4. Click **Load data** on **Main Page**. Explore the EDA page, or configure a modelling task and click **Train / refit**.
+
+Later launches reuse the environment and key. **Reload data** refreshes datasets. Keep the console open; press **Q** there to stop. Your key stays in Git-ignored `config/.env`; do not share it.
+
 <img width="1475" height="720" alt="scenario" src="https://github.com/user-attachments/assets/9a3ffc9c-2316-4f27-9a81-bbf933cea82f" />
 
 *Scenario analysis with adjustable inputs. Screenshots show example runs, not live forecasts or a fixed benchmark.*
@@ -70,17 +81,6 @@ data/          Local datasets and saved models (generated at runtime)
 **Historical evaluation is not a point-in-time backtest.** Data uses current revisions and observation dates, not historical publication dates. Forward-filling can therefore introduce look-ahead bias that chronological splits do not resolve. Monthly sampling does not eliminate autocorrelation.
 
 Scenarios measure model sensitivity, not causal economic effects. Direction labels describe net rate changes, not individual Fed/ECB meetings. Results are research outputs.
-
-## Run locally
-
-The launcher and locked environment support Windows 10/11 only. No preinstalled Python is needed.
-
-1. Clone the repository, or use **Code > Download ZIP** and extract it.
-2. Create a FRED account and generate your own [API key](https://fred.stlouisfed.org/docs/api/api_key.html).
-3. Double-click **`start.bat`** and enter the key when prompted. The launcher handles local Python 3.12, dependencies, key validation and startup checks, then opens your browser.
-4. Click **Load data** on **Main Page**. Explore the EDA page, or configure a modelling task and click **Train / refit**.
-
-Later launches reuse the environment and key. **Reload data** refreshes datasets. Keep the console open; press **Q** there to stop. Your key stays in Git-ignored `config/.env`; do not share it.
 
 ## Authorship and AI assistance
 
