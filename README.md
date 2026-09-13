@@ -85,3 +85,12 @@ Later launches reuse the environment and key. **Reload data** refreshes datasets
 ## Authorship and AI assistance
 
 Developed drawing on my experience in banking and financial markets. My contribution covers the concept, scope, architecture, data and modelling decisions, integration, verification and interpretation. **Claude (Anthropic) and GPT (OpenAI)** supported implementation and code work. I remain responsible for the assumptions and the final application.
+
+## License
+
+The original source code and documentation in this repository are licensed
+under the [MIT License](LICENSE).
+
+Third-party libraries and data obtained from FRED and Yahoo Finance remain
+subject to their respective licenses and terms of use. The MIT License does
+not grant rights to those data or override the providers' terms.
