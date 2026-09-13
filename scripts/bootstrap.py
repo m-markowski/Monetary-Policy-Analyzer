@@ -1,7 +1,6 @@
 """Prepare the local Windows environment and launch Monetary Policy Analyzer."""
 
 import argparse
-import getpass
 import hashlib
 import importlib
 import importlib.metadata
@@ -189,10 +188,11 @@ def ensure_key(reset: bool = False) -> str:
     if not sys.stdin.isatty():
         raise SetupError("Double-click start.bat in File Explorer to enter your FRED key interactively.")
     say(f"Create or view your own FRED API key here:\n{FRED_KEYS_URL}")
-    say("Paste only the key and press Enter. Input is hidden; pasted characters will not appear.")
+    say("Paste only the key and press Enter.")
+    say("The key will be visible in this console while you enter it.")
     say("An existing key will not be replaced unless the new key passes validation.")
     while True:
-        key = getpass.getpass("FRED API key: ").strip()
+        key = input("FRED API key: ").strip()
         if not KEY_PATTERN.fullmatch(key):
             say("Enter all 32 lowercase letters/digits. Empty input is not accepted.")
             continue
