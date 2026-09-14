@@ -50,7 +50,7 @@ to evaluate whether this selection generalises to unseen data.
 | Decision tree | 0.478 | **0.543** | 0.095 |
 | XGBoost | 0.412 | 0.650 | -0.298 |
 
-[//]: # (Leaderboard screenshot placeholder)
+<img width="1462" height="497" alt="leaderboard_case" src="https://github.com/user-attachments/assets/d67e7cea-724b-40a2-a94f-d06ebb65d509" />
 
 SVR was selected among the base models because it achieved the lowest Dev RMSE.
 Its Dev RMSE of 0.390 was lower than the no-change benchmark of 0.412.
@@ -69,7 +69,7 @@ reported as an observation rather than treated as the main result.
 
 ## Error analysis
 
-[//]: # (Residuals screenshot placeholder)
+<img width="1462" height="677" alt="residuals_case" src="https://github.com/user-attachments/assets/bd60593c-8bf2-4f4b-8ae5-b146129afb5d" />
 
 The largest errors are concentrated around the rapid Federal Reserve tightening cycle.
 During 2022 and early 2023, residuals are strongly positive, meaning that the realised
@@ -89,7 +89,7 @@ stable policy-rate periods, but anticipating rapid changes in the policy regime.
 
 ## Model interpretation
 
-[//]: # (Feature importance screenshot placeholder)
+<img width="732" height="587" alt="feature_importance_case" src="https://github.com/user-attachments/assets/4ece4d89-e820-4ea5-9328-18862579fbe4" />
 
 Permutation importance for the selected SVR model was calculated on the Dev period.
 The strongest feature was the one-year change in median house prices, followed by
