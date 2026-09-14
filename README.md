@@ -2,7 +2,9 @@
 
 **From macro data to forecasts you can inspect.**
 
-A local Python/Streamlit application for **US and euro-area macroeconomic and financial research**. It brings FRED and Yahoo Finance data, statistical analysis, model comparison and scenario analysis into one interface.
+[![CI](https://github.com/m-markowski/Monetary-Policy-Analyzer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/m-markowski/Monetary-Policy-Analyzer/actions/workflows/ci.yml)
+
+A Python/Streamlit research application for **US and euro-area macroeconomic and financial analysis**. It combines data ingestion, feature engineering, statistical diagnostics, time-aware model evaluation, explainability and scenario analysis in one workflow.
 
 Instead of stitching together downloads, cleaning scripts and separate notebooks, users can explore the economic backdrop, compare forecasts against simple baselines, and inspect what drives a prediction.
 
@@ -21,6 +23,16 @@ Later launches reuse the environment and key. **Reload data** refreshes datasets
 
 *Scenario analysis with adjustable inputs. Screenshots show example runs, not live forecasts or a fixed benchmark.*
 
+## What this project demonstrates
+
+| Area | Implemented in the project |
+| --- | --- |
+| **Data engineering** | FRED and Yahoo Finance ingestion with retries and stale-series checks, incremental/full refresh, Parquet/CSV caching and YAML-driven source and feature definitions. |
+| **Time-series machine learning** | Forward-change and Hike/Hold/Cut targets, chronological Train/Dev/Test splits with horizon-sized purges, expanding-window CV, in-fold feature selection and scaling, naive baselines and randomised/Optuna search over linear, SVM, tree, boosting and Keras models. |
+| **Statistical and econometric analysis** | Distribution and normality diagnostics, group comparisons, VIF and partial correlations, stationarity and cointegration, PCA/K-means structure, OLS/logit baselines, ARIMA/SARIMA and GARCH with holdout backtests. |
+| **Model evaluation and explainability** | Leaderboards across splits, skill vs no-change, Brier/log loss, Youden thresholds, native and permutation importance, tree SHAP, partial dependence and scenario sensitivity. |
+| **Software engineering** | Locked dependencies (`uv.lock`), automated Windows bootstrap with repository-local Python, compatibility-checked model persistence, modular UI/data/modelling layers, unit tests and CI. |
+
 <details>
 <summary><strong>More screenshots: model comparison, feature importance and forecasting</strong></summary>
 
@@ -32,7 +44,7 @@ The highlighted base model is selected on the Dev dataset.
 
 ### Feature importance
 
-Scaled bars show which inputs contributed most to the model's prediction.
+Scaled bars show which inputs the fitted model relies on most under the selected importance measure.
 
 <img width="1472" height="757" alt="importance" src="https://github.com/user-attachments/assets/5605baa7-2e99-4c0a-a686-752e6e59bf72" />
 
@@ -53,6 +65,23 @@ ARIMA/SARIMA projections include a model-based 95% prediction interval.
 | **Explain and challenge predictions** | Inspect residuals, class probabilities, feature importance, tree SHAP and partial dependence; vary inputs through scenario controls. |
 | **Forecast levels and volatility** | Use ARIMA/SARIMA for a single series' level and GARCH for the conditional volatility of its monthly changes, with separate historical holdout checks. |
 
+## Architecture
+
+```mermaid
+flowchart LR
+    FRED[FRED API] --> LOAD[Ingestion, staleness checks,\nfeature engineering]
+    YF[Yahoo Finance] --> LOAD
+    LOAD --> CACHE[(Parquet / CSV cache)]
+    CACHE --> EDA[Exploratory and\nstatistical analysis]
+    CACHE --> MONTHLY[Month-end modelling frame,\ntargets and leakage filter]
+    MONTHLY --> SPLIT[Chronological splits,\nexpanding-window CV]
+    SPLIT --> ML[Model roster and search]
+    ML --> BOARD[Leaderboard, baselines,\nskill vs naive]
+    ML --> EXPLAIN[SHAP, importance, PDP,\nscenario analysis]
+    ML --> STORE[(Saved models +\nmetadata sidecar)]
+    CACHE --> TS[ARIMA / SARIMA / GARCH]
+```
+
 ## Research design
 
 - Model search uses monthly snapshots and expanding-window validation with horizon-sized gaps. Feature selection and scaling stay inside each training fold. Regression targets forward changes, not trending levels.
@@ -71,8 +100,11 @@ src/           Data preparation and modelling logic
 src/models/    Targets, training, ensembles, evaluation and explanations
 utils/         Statistics, charts and interpretation text
 scripts/       Windows environment bootstrap
+tests/         Unit tests for the modelling logic
 data/          Local datasets and saved models (generated at runtime)
 ```
+
+**Development:** `uv run pytest` covers target construction, chronological splits and purges, leakage filtering, baselines, probability metrics and model persistence; `uv run ruff check .` lints. Both run in GitHub Actions on every push and pull request.
 
 </details>
 
