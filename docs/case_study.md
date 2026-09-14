@@ -40,7 +40,7 @@ folds.
 The final model is selected using Dev performance. The Test period is then used
 to evaluate whether this selection generalises to unseen data.
 
-The dataset was refreshed on 14 September 2026 and covered approximately 1991–2026.
+The dataset was refreshed on 14 September 2026 and covered approximately 1991-2026.
 
 ## Results
 
