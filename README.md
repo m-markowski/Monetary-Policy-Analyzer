@@ -1,6 +1,7 @@
 # Monetary Policy Analyzer
 
 [![CI](https://github.com/m-markowski/Monetary-Policy-Analyzer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/m-markowski/Monetary-Policy-Analyzer/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/m-markowski/Monetary-Policy-Analyzer)](https://github.com/m-markowski/Monetary-Policy-Analyzer/releases/latest)
 
 A local Python/Streamlit application for analysing **US and euro-area macroeconomic and financial data**. It connects data preparation, statistical analysis and forecasting, with simple benchmarks to check whether a model adds value.
 
