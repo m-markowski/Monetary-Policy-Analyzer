@@ -113,7 +113,7 @@ observation. In this run, the September 2026 Effective Federal Funds Rate was
 **3.630%** and the selected SVR predicts a three-month change of **-0.219 percentage
 points**, implying a **December 2026 rate of approximately 3.411%**.
 
-[//]: # (Scenario screenshot placeholder)
+<img width="1467" height="627" alt="scenario_regression" src="https://github.com/user-attachments/assets/e1b5e539-4ceb-425d-a638-8f15c92888d9" />
 
 The **Baseline level** shown above is the SVR forecast with all displayed drivers held
 at their September values. It is different from the historical **no-change benchmark**,
