@@ -106,6 +106,28 @@ the fitted model depends on individual inputs for predictive performance and sho
 not be interpreted as evidence that a given variable causes Federal Reserve policy
 changes.
 
+## Forward forecast and scenario analysis
+
+The trained model can also produce a forward-looking forecast from the latest complete
+observation. In this run, the September 2026 Effective Federal Funds Rate was
+**3.630%** and the selected SVR predicts a three-month change of **-0.219 percentage
+points**, implying a **December 2026 rate of approximately 3.411%**.
+
+[//]: # (Scenario screenshot placeholder)
+
+The **Baseline level** shown above is the SVR forecast with all displayed drivers held
+at their September values. It is different from the historical **no-change benchmark**,
+which would simply carry the 3.630% rate forward.
+
+Scenario controls allow selected inputs to be changed while the remaining features stay
+fixed. The resulting Scenario level therefore shows the model's sensitivity to alternative
+input assumptions. In the screenshot, no inputs have been changed, so the scenario and
+baseline forecasts are both **3.411%**.
+
+This is a **what-if sensitivity tool, not a causal or macroeconomic simulation**. Scenario
+responses show how the fitted model reacts to changed inputs; they do not imply that those
+changes would cause Federal Reserve policy to move accordingly.
+
 ## Limitations
 
 The experiment uses currently available historical data rather than a complete
@@ -121,13 +143,13 @@ The analysis is predictive rather than causal.
 
 ## Takeaway
 
-The experiment illustrates why a reasonable validation result is not sufficient evidence
-of forecasting improvement.
+SVR outperformed the no-change benchmark on Dev but failed to maintain that advantage
+on Test. The simple no-change forecast therefore remained the stronger out-of-sample
+benchmark for this three-month task.
 
-SVR outperformed the no-change benchmark on Dev and was therefore the appropriate
-model to carry forward, but it failed to maintain that advantage on the Test period.
-A simple no-change forecast ultimately provided a stronger out-of-sample benchmark
-for this three-month forecasting task.
+The largest errors occurred during the rapid tightening cycle, illustrating the difficulty
+of anticipating abrupt policy changes from historical macro-financial relationships.
 
-The largest errors occurred during the rapid tightening cycle, highlighting the difficulty
-of forecasting abrupt policy changes from historical macro-financial relationships.
+The model can still support forward-looking research through point forecasts and scenario
+analysis, but its negative Test skill means these outputs should be treated as model-based
+research signals rather than evidence of reliable future policy prediction.

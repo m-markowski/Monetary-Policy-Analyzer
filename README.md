@@ -21,7 +21,7 @@ Later launches reuse the environment and key. **Reload data** refreshes datasets
 
 **The model selected on Dev did not beat "no change" on Test.** SVR achieved a Test RMSE of **0.619 percentage points**, versus **0.570** for "no change". A decision tree did better on Test, but was not selected on Dev; the report keeps that distinction.
 
-**[Read the case study: setup, results, errors and feature importance](docs/case_study.md)**
+**[Read the case study: setup, results, errors and feature importance](docs/case_study_regression.md)**
 
 ## Application
 
