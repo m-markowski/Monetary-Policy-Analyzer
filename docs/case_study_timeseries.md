@@ -42,7 +42,7 @@ history. The displayed future forecasts are therefore separate from the holdout 
 
 ## Time-series diagnostics
 
-[//]: # (ts2 placeholder)
+<img width="1470" height="637" alt="ts2" src="https://github.com/user-attachments/assets/11b34133-0426-43ed-be75-6e7aeac2e069" />
 
 The rate-level ACF declines slowly, while the PACF is dominated by its first lag.
 This indicates strong persistence. The displayed Augmented Dickey-Fuller test does
@@ -59,7 +59,7 @@ with one non-seasonal difference (d = 1).
 | No-change baseline | 0.634 | 0.618 | 0.000 |
 | **Selected SARIMA** | **0.491** | **0.474** | **Approximately +0.40** |
 
-[//]: # (ts3 placeholder)
+<img width="1466" height="785" alt="ts3" src="https://github.com/user-attachments/assets/5074b88a-983d-4671-ad09-61bced6dbfdd" />
 
 The no-change baseline carries the final pre-holdout rate forward for all 12 months.
 SARIMA produced lower RMSE and MAE on this window; both errors are measured in
@@ -79,7 +79,7 @@ on the benchmark in this window without fully capturing the series' time depende
 
 ## Forward rate forecast
 
-[//]: # (ts5 placeholder)
+<img width="1467" height="586" alt="ts5" src="https://github.com/user-attachments/assets/4e876574-4282-4fce-be1e-07755a892845" />
 
 After refitting through August 2026, SARIMA projects the rate over the following
 12 months. The forecast mean suggests a modest decline from around 3.6%, followed
@@ -93,7 +93,7 @@ therefore does not imply a precise forecast.
 The automatic search selected **GARCH(2, 1)** with a pre-holdout AIC of **-162.79**.
 It models monthly rate changes rather than the rate level or SARIMA residuals.
 
-[//]: # (ts7 placeholder)
+<img width="1486" height="727" alt="ts7" src="https://github.com/user-attachments/assets/84006202-7d0f-486f-bafe-a3a62ff2ae1e" />
 
 The historical fitted volatility is higher during clusters of large rate changes
 and lower during stable periods. This is an in-sample description, not evidence
@@ -107,7 +107,7 @@ forecast volatility with absolute demeaned monthly changes, a rough proxy rather
 than directly observed volatility. No volatility benchmark is reported, so these
 errors alone do not demonstrate superior forecasting performance.
 
-[//]: # (ts8 placeholder)
+<img width="1460" height="575" alt="ts8" src="https://github.com/user-attachments/assets/327ec51b-7232-417d-9fd5-9ac069371b97" />
 
 After refitting, the forward volatility projection starts near **0.02 percentage
 points** and gradually rises towards **0.04-0.05 percentage points** over the horizon.
