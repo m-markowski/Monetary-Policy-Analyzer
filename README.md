@@ -1,7 +1,5 @@
 # Monetary Policy Analyzer
 
-**From macro data to forecasts you can inspect.**
-
 [![CI](https://github.com/m-markowski/Monetary-Policy-Analyzer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/m-markowski/Monetary-Policy-Analyzer/actions/workflows/ci.yml)
 
 A local Python/Streamlit application for analysing **US and euro-area macroeconomic and financial data**. It connects data preparation, statistical analysis and forecasting, with simple benchmarks to check whether a model adds value.
@@ -17,28 +15,43 @@ The launcher and locked environment support Windows 10/11 only. No preinstalled 
 
 Later launches reuse the environment and key. **Reload data** refreshes datasets. Keep the console open; press **Q** there to stop. Your key stays in Git-ignored `config/.env`; do not share it.
 
-## Case study: a three-month Fed rate forecast
+## Case studies
 
-**The model selected on Dev did not beat "no change" on Test.** SVR achieved a Test RMSE of **0.619 percentage points**, versus **0.570** for "no change". A decision tree did better on Test, but was not selected on Dev; the report keeps that distinction.
+Three worked examples using the Effective Federal Funds Rate, with experimental
+setups, results, diagnostics and screenshots.
 
-**[Read the case study: setup, results, errors and feature importance](docs/case_study_regression.md)**
+### 1. Regression: a three-month rate forecast
 
-## Application
+**The Dev-selected SVR did not beat "no change" on Test.** Test RMSE was
+**0.619 percentage points**, versus **0.570** for the benchmark. The case study
+examines forecast errors, feature importance and a forward forecast with scenario
+controls.
 
-<img width="900" alt="Scenario analysis with adjustable model inputs" src="https://github.com/user-attachments/assets/9a3ffc9c-2316-4f27-9a81-bbf933cea82f" />
+**[Read the regression case study](docs/case_study_regression.md)**
 
-*Adjust inputs to inspect model sensitivity. Example interface view, not a live forecast or the case-study result.*
+### 2. Classification: Cut, Hold or Hike over three months
 
-<details>
-<summary><strong>View a single-series forecast</strong></summary>
+**The Dev-selected logistic regression's ROC-AUC fell from 0.743 on Dev to 0.531
+on Test.** It predicted Hold for every Test observation under argmax. Dev-tuned
+Youden thresholds improved F1-macro and balanced accuracy, but trailing momentum
+remained stronger on both metrics. The case study also explores feature importance
+and forward scenario probabilities.
 
-<img width="900" alt="ARIMA/SARIMA forecast with a model-based prediction interval" src="https://github.com/user-attachments/assets/b823d3b0-dac9-4096-a474-ddc1f3d0a0c1" />
+**[Read the classification case study](docs/case_study_classification.md)**
 
-*Example ARIMA/SARIMA forecast with a 95% prediction interval, separate from the supervised-model case study.*
+### 3. Time series: rate levels and volatility
 
-</details>
+**SARIMA beat "no change" on a separate 12-month holdout**, with RMSE of
+**0.491 versus 0.634 percentage points** — approximately **40% lower mean squared
+error**. The case study examines residual diagnostics, prediction intervals and
+a complementary GARCH volatility forecast evaluated against a rough volatility proxy.
 
-## What this project demonstrates
+**[Read the time-series case study](docs/case_study_timeseries.md)**
+
+*The time-series experiment uses a different horizon and evaluation window;
+its results are not directly comparable with the three-month ML experiments.*
+
+## The project's scope
 
 | Area | Implemented in the project |
 | --- | --- |
@@ -81,7 +94,7 @@ utils/         Statistics, charts and interpretation text
 scripts/       Windows environment bootstrap
 tests/         Unit tests for the modelling logic
 .github/       GitHub Actions workflow
-docs/          Case study
+docs/          Regression, classification and time-series case studies
 data/          Local datasets and saved models (generated at runtime)
 ```
 
