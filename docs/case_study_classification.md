@@ -57,7 +57,7 @@ The dataset was refreshed in September 2026 and covered approximately 1991-2026.
 | Majority baseline | - | - | 0.227 |
 | Trailing-momentum baseline | - | - | **0.690** |
 
-<!-- SCREENSHOT PLACEHOLDER: classification_leaderboard.png -->
+<img width="1457" height="502" alt="leaderboard_case" src="https://github.com/user-attachments/assets/cf66b579-dc61-4737-bdd2-67b2dd46eb34" />
 
 Logistic regression was selected among the base models because it achieved the highest
 Dev ROC-AUC of 0.743, narrowly ahead of random forest at 0.741.
@@ -79,7 +79,7 @@ matched the majority baseline and performed substantially worse than trailing mo
 Under the default argmax rule, the selected logistic regression predicted **Hold for
 all 64 Test observations**.
 
-[//]: # (case_argmax placeholder)
+<img width="1461" height="650" alt="case_argmax" src="https://github.com/user-attachments/assets/41a91ecf-4e14-43e8-9cc0-ea46d533699a" />
 
 This correctly classified all 33 Hold months but missed all 12 Cut and 19 Hike months.
 As a result, accuracy was approximately 52%, while balanced accuracy was only **0.333**
@@ -91,7 +91,7 @@ The ROC curves show that the model retained some ranking ability for Cut
 The application can alternatively tune class thresholds using **Youden's J statistic**
 on the Dev split and apply those fixed thresholds to Test.
 
-[//]: # (case_youden placeholder)
+<img width="1460" height="656" alt="case_youden" src="https://github.com/user-attachments/assets/286efd11-4e1b-4c6a-8f23-4e0c7e7e65fd" />
 
 With Youden tuning, the model correctly classified 12 of 12 Cut months, 11 of 19 Hike
 months and 10 of 33 Hold months. Overall accuracy remained approximately 52%, but
@@ -103,7 +103,7 @@ introduced a trade-off: many actual Hold months were classified as Cut.
 
 ## Model interpretation
 
-[//]: # (case_feature placeholder)
+<img width="1466" height="687" alt="case_feature" src="https://github.com/user-attachments/assets/6e2852e1-17aa-42a6-866d-a267246c988a" />
 
 The selected logistic regression provides two complementary views of feature importance.
 
@@ -135,7 +135,7 @@ For the September-to-December 2026 horizon, the selected logistic regression ass
 
 The resulting predicted stance is therefore **Hold**.
 
-[//]: # (case_scenario_class placeholder)
+<img width="1465" height="717" alt="case_scenario_class" src="https://github.com/user-attachments/assets/71a391e8-ffc2-4a35-a68e-8e6829a0f000" />
 
 This should be interpreted as the net direction of the policy rate over the three-month
 window rather than a prediction for a specific Federal Reserve meeting.
